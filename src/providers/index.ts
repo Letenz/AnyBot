@@ -10,6 +10,13 @@ type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
 
 const providerFactories: Record<string, ProviderFactory> = {
   codex: (config) => new CodexProvider({ bin: config?.bin as string | undefined }),
+  "claude-code": (config) =>
+    new ClaudeCodeProvider({
+      pathToClaudeCodeExecutable: config?.pathToClaudeCodeExecutable as string | undefined,
+      maxTurns: config?.maxTurns as number | undefined,
+      permissionMode: config?.permissionMode as PermissionMode | undefined,
+      defaultModel: config?.defaultModel as string | undefined,
+    }),
   "gemini-cli": (config) =>
     new GeminiCliProvider({
       bin: config?.bin as string | undefined,
@@ -25,13 +32,6 @@ const providerFactories: Record<string, ProviderFactory> = {
     new QoderCliProvider({
       bin: config?.bin as string | undefined,
       maxTurns: config?.maxTurns as number | undefined,
-    }),
-  "claude-code": (config) =>
-    new ClaudeCodeProvider({
-      pathToClaudeCodeExecutable: config?.pathToClaudeCodeExecutable as string | undefined,
-      maxTurns: config?.maxTurns as number | undefined,
-      permissionMode: config?.permissionMode as PermissionMode | undefined,
-      defaultModel: config?.defaultModel as string | undefined,
     }),
 };
 
