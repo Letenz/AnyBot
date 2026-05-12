@@ -107,11 +107,13 @@ echo ""
 echo "  1) codex       — OpenAI Codex CLI ${DIM}(npm install -g @openai/codex)${NC}"
 echo "  2) gemini-cli  — Google Gemini CLI ${DIM}(npm install -g @anthropic-ai/gemini-cli 或查看官方文档)${NC}"
 echo "  3) qoder-cli   — Qoder CLI ${DIM}(详见 https://docs.qoder.com)${NC}"
+echo "  4) claude-code  — Claude Code ${DIM}(使用本机已登录的 claude 命令)${NC}"
 echo ""
 PROVIDER_CHOICE=$(prompt_input "请选择默认 Provider [1]: ")
 case "$PROVIDER_CHOICE" in
   2) PROVIDER="gemini-cli" ;;
   3) PROVIDER="qoder-cli" ;;
+  4) PROVIDER="claude-code" ;;
   *) PROVIDER="codex" ;;
 esac
 ok "默认 Provider: $PROVIDER"
@@ -134,10 +136,14 @@ case "$PROVIDER" in
     PROVIDER_BIN="qodercli"
     PROVIDER_INSTALL_HINT="详见 https://docs.qoder.com"
     ;;
+  claude-code)
+    PROVIDER_BIN="claude"
+    PROVIDER_INSTALL_HINT="安装并登录 Claude Code CLI；或设置 CLAUDE_CODE_BIN 指向你的 claude 可执行文件"
+    ;;
 esac
 
 if command -v "$PROVIDER_BIN" >/dev/null 2>&1; then
-  VER=$("$PROVIDER_BIN" --version 2>/dev/null | head -1 || echo "已安装")
+  VER=$(command "$PROVIDER_BIN" --version 2>/dev/null | head -1 || echo "已安装")
   ok "$PROVIDER_BIN — $VER"
 else
   warn "$PROVIDER_BIN 未找到"
@@ -246,6 +252,20 @@ case "$PROVIDER" in
     info "Qoder CLI 默认跳过权限检查（--dangerously-skip-permissions）"
     ok "安全模式: 自动跳过权限"
     ;;
+  claude-code)
+    info "Claude Code 会按 CODEX_SANDBOX 映射权限模式："
+    echo "  1) read-only          — 只允许读取工具（默认）"
+    echo "  2) workspace-write    — 可写工作目录"
+    echo "  3) danger-full-access — 跳过权限检查（危险）"
+    echo ""
+    SANDBOX_CHOICE=$(prompt_input "请选择 [1]: ")
+    case "$SANDBOX_CHOICE" in
+      2) CODEX_SANDBOX="workspace-write" ;;
+      3) CODEX_SANDBOX="danger-full-access" ;;
+      *) CODEX_SANDBOX="read-only" ;;
+    esac
+    ok "安全模式: $CODEX_SANDBOX"
+    ;;
 esac
 
 # ── Configure web port ───────────────────────────────────────────────
@@ -276,7 +296,7 @@ fi
 if [ "${SKIP_ENV:-0}" != "1" ]; then
   cat > "$ENV_FILE" <<EOF
 # ── Provider ────────────────────────────────────────
-# 可选: codex, gemini-cli, cursor-cli, qoder-cli
+# 可选: codex, gemini-cli, cursor-cli, qoder-cli, claude-code
 PROVIDER=$PROVIDER
 
 # ── Codex CLI ───────────────────────────────────────
@@ -294,6 +314,14 @@ GEMINI_CLI_APPROVAL_MODE=$GEMINI_APPROVAL_MODE
 # ── Qoder CLI ──────────────────────────────────────
 QODER_CLI_BIN=qodercli
 QODER_CLI_MAX_TURNS=
+
+# ── Claude Code ────────────────────────────────────
+CLAUDE_CODE_BIN=claude
+# 可选：只在你想改用 API Key 认证时启用
+# ANTHROPIC_API_KEY=
+CLAUDE_AGENT_MODEL=
+CLAUDE_AGENT_PERMISSION_MODE=
+CLAUDE_AGENT_MAX_TURNS=
 
 # ── Web ─────────────────────────────────────────────
 WEB_PORT=$WEB_PORT

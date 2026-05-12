@@ -1,8 +1,10 @@
+import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import type { IProvider } from "./types.js";
 import { CodexProvider } from "./codex.js";
 import { GeminiCliProvider } from "./gemini-cli.js";
 import { CursorCliProvider } from "./cursor-cli.js";
 import { QoderCliProvider } from "./qoder-cli.js";
+import { ClaudeCodeProvider } from "./claude-code.js";
 
 type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
 
@@ -24,14 +26,26 @@ const providerFactories: Record<string, ProviderFactory> = {
       bin: config?.bin as string | undefined,
       maxTurns: config?.maxTurns as number | undefined,
     }),
+  "claude-code": (config) =>
+    new ClaudeCodeProvider({
+      pathToClaudeCodeExecutable: config?.pathToClaudeCodeExecutable as string | undefined,
+      maxTurns: config?.maxTurns as number | undefined,
+      permissionMode: config?.permissionMode as PermissionMode | undefined,
+      defaultModel: config?.defaultModel as string | undefined,
+    }),
 };
+
+export function normalizeProviderType(type: string): string {
+  return type === "claude-agent" ? "claude-code" : type;
+}
 
 export function getRegisteredProviderTypes(): string[] {
   return Object.keys(providerFactories);
 }
 
 export function createProvider(type: string, config?: Record<string, unknown>): IProvider {
-  const factory = providerFactories[type];
+  const normalizedType = normalizeProviderType(type);
+  const factory = providerFactories[normalizedType];
   if (!factory) {
     throw new Error(
       `不支持的 Provider: ${type}。可用: ${Object.keys(providerFactories).join(", ")}`,
@@ -71,6 +85,7 @@ export { CodexProvider } from "./codex.js";
 export { GeminiCliProvider } from "./gemini-cli.js";
 export { CursorCliProvider } from "./cursor-cli.js";
 export { QoderCliProvider } from "./qoder-cli.js";
+export { ClaudeCodeProvider } from "./claude-code.js";
 export {
   ProviderTimeoutError,
   ProviderProcessError,

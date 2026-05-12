@@ -6,6 +6,7 @@ import { createApp } from "./web/server.js";
 import {
   initProvider,
   getProvider,
+  normalizeProviderType,
   ProviderTimeoutError,
   ProviderProcessError,
   ProviderEmptyOutputError,
@@ -35,7 +36,7 @@ import {
   getSandbox,
 } from "./shared.js";
 
-const providerType = process.env.PROVIDER || "codex";
+const providerType = normalizeProviderType(process.env.PROVIDER || "codex");
 
 function getProviderConfig(type: string): Record<string, unknown> {
   switch (type) {
@@ -58,6 +59,15 @@ function getProviderConfig(type: string): Record<string, unknown> {
         maxTurns: process.env.QODER_CLI_MAX_TURNS
           ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
           : undefined,
+      };
+    case "claude-code":
+      return {
+        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_BIN,
+        defaultModel: process.env.CLAUDE_AGENT_MODEL,
+        maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
+          ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
+          : undefined,
+        permissionMode: process.env.CLAUDE_AGENT_PERMISSION_MODE,
       };
     default:
       return {};

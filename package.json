@@ -13,6 +13,7 @@
     "bot:status": "sh ./scripts/bot-status.sh"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.139",
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.3.1",

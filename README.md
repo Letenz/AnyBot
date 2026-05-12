@@ -4,7 +4,7 @@
 
 把 AI CLI 工具变成可远程使用的 AI 助手——通过内置 **Web UI** 在浏览器里对话，或通过 **飞书机器人** / **QQ 机器人** / **Telegram 机器人** 在手机 / 桌面端随时向你这台机器上的 AI 发消息。
 
-目前支持 [OpenAI Codex CLI](https://github.com/openai/codex)、[Google Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Cursor CLI](https://docs.cursor.com/cli) 和 [Qoder CLI](https://docs.qoder.com) 作为 Provider，架构已为接入更多 CLI 工具（Claude Code 等）做好准备。
+目前支持 [OpenAI Codex CLI](https://github.com/openai/codex)、[Google Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Cursor CLI](https://docs.cursor.com/cli)、[Qoder CLI](https://docs.qoder.com) 和 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 作为 Provider。
 
 支持 **macOS** 和 **Linux**。
 
@@ -58,7 +58,7 @@
 | [Node.js](https://nodejs.org/) | 18+ | 运行环境 |
 | npm | 随 Node.js 附带 | 包管理 |
 
-以及至少安装一个 Provider CLI：
+以及至少配置一个 Provider：
 
 | Provider | 安装方式 | 说明 |
 |----------|---------|------|
@@ -66,6 +66,7 @@
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | 参见 [官方文档](https://github.com/google-gemini/gemini-cli) | Google 的 CLI 工具 |
 | [Cursor CLI](https://docs.cursor.com/cli) | Cursor 设置中启用 `agent` 命令 | Cursor 编辑器的 Agent CLI |
 | [Qoder CLI](https://docs.qoder.com) | 参见 [官方文档](https://docs.qoder.com) | Qoder 的 AI CLI 工具 |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 使用本机已登录的 `claude` 命令；项目依赖已包含 SDK | Anthropic 的 CLI 工具 |
 
 <details>
 <summary><b>Linux 安装指南</b></summary>
@@ -113,10 +114,10 @@ sh setup.sh
 
 `setup.sh` 会引导你完成：
 - 检测操作系统与基础依赖（Node.js、npm）
-- **选择默认 Provider**（Codex CLI / Gemini CLI / Cursor CLI）
-- 检测对应 CLI 是否已安装，并提供安装指引
+- **选择默认 Provider**（Codex CLI / Gemini CLI / Cursor CLI / Qoder CLI / Claude Code）
+- 检测对应 CLI 或 SDK 配置，并提供安装指引
 - 设置工作目录
-- 配置安全模式（Codex: Sandbox 模式 / Gemini: Approval Mode）
+- 配置安全模式（Codex/Claude: Sandbox 模式 / Gemini: Approval Mode）
 - 配置 Web UI 端口
 - 生成 `.env` 配置文件（包含所有 Provider 的配置）
 - 安装 npm 依赖
@@ -162,9 +163,9 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 | `gemini-cli` | ✅ 可用 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Google 的 CLI，支持会话续聊 |
 | `cursor-cli` | ✅ 可用 | [Cursor CLI](https://docs.cursor.com/cli) | Cursor 的 Agent CLI，支持会话续聊、Sandbox |
 | `qoder-cli` | ✅ 可用 | [Qoder CLI](https://docs.qoder.com) | Qoder 的 CLI，支持会话续聊 |
-| `claude-code` | 🔜 计划中 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic 的 CLI |
+| `claude-code` | ✅ 可用 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic 的 CLI，支持会话续聊、Sandbox 映射 |
 
-通过环境变量 `PROVIDER=codex`、`PROVIDER=gemini-cli`、`PROVIDER=cursor-cli` 或 `PROVIDER=qoder-cli` 切换默认 Provider，也可在 Web UI 中随时切换。
+通过环境变量 `PROVIDER=codex`、`PROVIDER=gemini-cli`、`PROVIDER=cursor-cli`、`PROVIDER=qoder-cli` 或 `PROVIDER=claude-code` 切换默认 Provider，也可在 Web UI 中随时切换。
 
 ---
 
@@ -414,7 +415,7 @@ AnyBot 已在代码层面做了处理——在 Linux 上会自动以 `--sandbox 
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `PROVIDER` | `codex` | 使用的 Provider：`codex`、`gemini-cli`、`cursor-cli`、`qoder-cli` |
+| `PROVIDER` | `codex` | 使用的 Provider：`codex`、`gemini-cli`、`cursor-cli`、`qoder-cli`、`claude-code` |
 | `WEB_PORT` | `19981` | Web UI 端口 |
 | `LOG_LEVEL` | `info` | 日志级别：`debug` / `info` / `warn` / `error` |
 | `LOG_INCLUDE_CONTENT` | `false` | 日志中包含消息内容（调试用） |
@@ -452,6 +453,18 @@ AnyBot 已在代码层面做了处理——在 Linux 上会自动以 `--sandbox 
 |------|--------|------|
 | `QODER_CLI_BIN` | `qodercli` | Qoder CLI 可执行文件路径 |
 | `QODER_CLI_MAX_TURNS` | — | 最大 Agent 循环轮数（0 为不限制） |
+
+### Claude Code 配置
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `CLAUDE_CODE_BIN` | `claude` | 本机 `claude` 可执行文件路径，默认使用已登录的 Claude Code CLI |
+| `ANTHROPIC_API_KEY` | — | 可选；只在你想改用 API Key 认证时启用 |
+| `CLAUDE_AGENT_MODEL` | — | 覆盖使用的模型 |
+| `CLAUDE_AGENT_PERMISSION_MODE` | — | 覆盖权限模式：`default` / `acceptEdits` / `bypassPermissions` / `plan` / `dontAsk` / `auto` |
+| `CLAUDE_AGENT_MAX_TURNS` | — | 最大 Agent 循环轮数 |
+
+注意：SDK 会执行 `CLAUDE_CODE_BIN` 指向的可执行文件，不会读取 shell function 或 alias。如果你的 `claude` 是 shell function 包装器，请把同等逻辑保存成脚本，并将 `CLAUDE_CODE_BIN` 指向该脚本。
 
 ---
 
@@ -528,7 +541,8 @@ AnyBot/
 │   │   ├── codex.ts        # Codex CLI Provider 实现
 │   │   ├── gemini-cli.ts   # Gemini CLI Provider 实现
 │   │   ├── cursor-cli.ts   # Cursor CLI Provider 实现
-│   │   └── qoder-cli.ts    # Qoder CLI Provider 实现
+│   │   ├── qoder-cli.ts    # Qoder CLI Provider 实现
+│   │   └── claude-code.ts  # Claude Code Provider 实现
 │   ├── lark.ts             # 飞书 API（消息、文件、图片）
 │   ├── logger.ts           # 结构化日志
 │   ├── message.ts          # 消息解析（输入输出）
