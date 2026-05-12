@@ -316,7 +316,7 @@ All channels (Feishu, QQ, Telegram) support the following `/` commands:
 | `/provider` | View available providers and current selection |
 | `/provider <name>` | Switch provider, e.g. `/provider gemini-cli` |
 | `/model` | View available models for the current provider |
-| `/model <name>` | Switch model, e.g. `/model gpt-5.3-codex` |
+| `/model <name>` | Switch model, e.g. `/model gpt-5.5` |
 
 When switching providers, the last-used model for each provider is remembered and automatically restored when switching back.
 

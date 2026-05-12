@@ -53,10 +53,11 @@ export class CodexProvider implements IProvider {
 
     listModels(): ProviderModel[] {
         return [
-            {id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "默认编程模型"},
-            {id: "gpt-5.4", name: "GPT-5.4", description: "最新通用模型"},
+            {id: "gpt-5.5", name: "GPT-5.5", description: "最新通用模型"},
+            {id: "gpt-5.4", name: "GPT-5.4", description: "通用模型"},
             {id: "gpt-5.4-mini", name: "GPT-5.4 Mini", description: "轻量快速模型"},
-            {id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "稳定编程模型"},
+            {id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "编程模型"},
+            {id: "gpt-5.2", name: "GPT-5.2", description: "稳定通用模型"},
         ];
     }
 

@@ -316,7 +316,7 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 | `/provider` | 查看可用供应商列表及当前选择 |
 | `/provider <名称>` | 切换供应商，例如 `/provider gemini-cli` |
 | `/model` | 查看当前供应商的可用模型列表 |
-| `/model <名称>` | 切换模型，例如 `/model gpt-5.3-codex` |
+| `/model <名称>` | 切换模型，例如 `/model gpt-5.5` |
 
 切换供应商时会自动记住每个供应商上次使用的模型，再次切回时自动恢复。
 

@@ -41,6 +41,37 @@ function ensureConfig(): void {
   }
 }
 
+function areSameModels(a: ModelEntry[] | undefined, b: ModelEntry[]): boolean {
+  return (
+    !!a &&
+    a.length === b.length &&
+    a.every((model, index) => {
+      const next = b[index];
+      return (
+        !!next &&
+        model.id === next.id &&
+        model.name === next.name &&
+        model.description === next.description
+      );
+    })
+  );
+}
+
+function selectCurrentModel(
+  config: ModelConfig,
+  providerType: string,
+  models: ModelEntry[],
+): string {
+  const validIds = new Set(models.map((model) => model.id));
+  const candidates = [
+    config.provider === providerType ? config.currentModel : undefined,
+    config.lastSelected[providerType],
+    models[0]?.id,
+  ];
+
+  return candidates.find((modelId) => modelId && validIds.has(modelId)) ?? "";
+}
+
 export function readModelConfig(): ModelConfig {
   ensureConfig();
   const raw = readFileSync(CONFIG_PATH, "utf-8");
@@ -51,16 +82,20 @@ export function readModelConfig(): ModelConfig {
   }
 
   const provider = getProvider();
+  const providerModels = provider.listModels();
   const needsRefresh =
     config.provider !== provider.type ||
     !config.models ||
     config.models.length === 0 ||
-    (config.models.length === 1 && config.models[0].id === "auto");
+    (config.models.length === 1 && config.models[0].id === "auto") ||
+    !areSameModels(config.models, providerModels);
 
   if (needsRefresh) {
+    const currentModel = selectCurrentModel(config, provider.type, providerModels);
     config.provider = provider.type;
-    config.models = provider.listModels();
-    config.currentModel = config.lastSelected[provider.type] || config.models[0]?.id || "";
+    config.models = providerModels;
+    config.currentModel = currentModel;
+    config.lastSelected[provider.type] = currentModel;
     writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
   }
 
