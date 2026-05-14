@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 
 import { applyProxy } from "./proxy.js";
 import { createApp } from "./web/server.js";
@@ -120,13 +121,24 @@ const sessionGenerationByChat = new Map<string, number>();
 
 // --- Core logic ---
 
-function getSessionGeneration(chatId: string): number {
-  return sessionGenerationByChat.get(chatId) || 0;
+function getChatSessionKey(source: string | undefined, chatId: string): string {
+  return `${source || "unknown"}:${chatId}`;
+}
+
+function getSessionGeneration(sessionKey: string): number {
+  return sessionGenerationByChat.get(sessionKey) || 0;
 }
 
 function resetChatSession(chatId: string, source?: string): void {
-  sessionIdByChat.delete(chatId);
-  sessionGenerationByChat.set(chatId, getSessionGeneration(chatId) + 1);
+  const sessionKey = getChatSessionKey(source, chatId);
+  sessionIdByChat.delete(sessionKey);
+  sessionGenerationByChat.set(sessionKey, getSessionGeneration(sessionKey) + 1);
+  logger.info("chat.session.reset", {
+    chatId,
+    source: source || "unknown",
+    sessionKey,
+    generation: getSessionGeneration(sessionKey),
+  });
   if (source) {
     db.detachChatId(source, chatId);
   }
@@ -172,8 +184,9 @@ async function generateReply(
   imagePaths: string[] = [],
   source: string = "unknown",
 ): Promise<string> {
-  const sessionId = sessionIdByChat.get(chatId);
-  const sessionGeneration = getSessionGeneration(chatId);
+  const sessionKey = getChatSessionKey(source, chatId);
+  const sessionId = sessionIdByChat.get(sessionKey);
+  const sessionGeneration = getSessionGeneration(sessionKey);
   const prompt = sessionId
     ? buildResumePrompt(userText, source)
     : buildFirstTurnPrompt(userText, source);
@@ -206,10 +219,11 @@ async function generateReply(
     prompt,
     imagePaths,
     sessionId: sessionId || undefined,
+    newSessionId: sessionId ? undefined : randomUUID(),
   });
 
-  if (result.sessionId && sessionGeneration === getSessionGeneration(chatId)) {
-    sessionIdByChat.set(chatId, result.sessionId);
+  if (result.sessionId && sessionGeneration === getSessionGeneration(sessionKey)) {
+    sessionIdByChat.set(sessionKey, result.sessionId);
   }
 
   db.addMessage(dbSession.id, "assistant", result.text);

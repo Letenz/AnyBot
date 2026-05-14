@@ -117,6 +117,7 @@ export class ClaudeCodeProvider implements IProvider {
       prompt,
       model,
       sessionId,
+      newSessionId,
       timeoutMs = DEFAULT_TIMEOUT_MS,
     } = opts;
     const sandbox = opts.sandbox ?? "read-only";
@@ -138,6 +139,7 @@ export class ClaudeCodeProvider implements IProvider {
       sandbox,
       model: resultModel || null,
       sessionId: sessionId || null,
+      newSessionId: sessionId ? null : newSessionId || null,
       promptChars: prompt.length,
       timeoutMs,
       permissionMode,
@@ -161,6 +163,7 @@ export class ClaudeCodeProvider implements IProvider {
           cwd: workdir,
           model: resultModel,
           resume: sessionId,
+          sessionId: sessionId ? undefined : newSessionId,
           pathToClaudeCodeExecutable: this.pathToClaudeCodeExecutable,
           maxTurns: this.maxTurns,
           permissionMode,

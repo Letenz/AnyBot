@@ -12,6 +12,8 @@ export interface RunOptions {
   model?: string;
   imagePaths?: string[];
   sessionId?: string;
+  /** Optional UUID used by providers that can explicitly create a fresh session. */
+  newSessionId?: string;
   sandbox?: SandboxMode;
   timeoutMs?: number;
 }

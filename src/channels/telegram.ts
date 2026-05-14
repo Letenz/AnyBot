@@ -243,18 +243,16 @@ export class TelegramChannel implements IChannel {
 
     if (!userText) return;
 
-    const cmd = handleCommand(userText, chatId, "telegram", this.callbacks!);
-    if (cmd.handled) {
-      this.enqueueChatTask(chatId, async () => {
-        if (cmd.reply) await this.sendReply(chatId, cmd.reply);
-      });
-      return;
-    }
-
-    const cleanText = userText.replace(/^\/\w+\s*/, "");
-    if (!cleanText) return;
-
     this.enqueueChatTask(chatId, async () => {
+      const cmd = handleCommand(userText, chatId, "telegram", this.callbacks!);
+      if (cmd.handled) {
+        if (cmd.reply) await this.sendReply(chatId, cmd.reply);
+        return;
+      }
+
+      const cleanText = userText.replace(/^\/\w+\s*/, "");
+      if (!cleanText) return;
+
       try {
         await this.apiCall("sendChatAction", { chat_id: message.chat.id, action: "typing" });
       } catch { /* best effort */ }

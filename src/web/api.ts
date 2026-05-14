@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
+import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { getProvider, getRegisteredProviderTypes } from "../providers/index.js";
 import { logger } from "../logger.js";
@@ -467,6 +468,7 @@ export function chatRouter(): Router {
         prompt,
         imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
         sessionId: session.sessionId || undefined,
+        newSessionId: session.sessionId ? undefined : randomUUID(),
       });
 
       const providerSessionId = result.sessionId || session.sessionId;

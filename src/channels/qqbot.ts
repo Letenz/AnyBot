@@ -19,6 +19,7 @@ export class QQBotChannel implements IChannel {
   private lastSeq: number | null = null;
   private accessToken: string | null = null;
   private tokenExpiresAt: number = 0;
+  private queueByChat = new Map<string, Promise<void>>();
 
   async start(callbacks: ChannelCallbacks): Promise<void> {
     const config = readChannelConfig<QQBotChannelConfig>("qqbot");
@@ -240,28 +241,43 @@ export class QQBotChannel implements IChannel {
       return;
     }
 
-    const cmd = handleCommand(userText, chatId, "qqbot", this.callbacks!);
-    if (cmd.handled) {
-      if (cmd.reply) await this.sendText(chatId, message.id, cmd.reply, eventType);
-      return;
-    }
+    this.enqueueChatTask(chatId, async () => {
+      const cmd = handleCommand(userText, chatId, "qqbot", this.callbacks!);
+      if (cmd.handled) {
+        if (cmd.reply) await this.sendText(chatId, message.id, cmd.reply, eventType);
+        return;
+      }
 
-    try {
-      const reply = await this.callbacks!.generateReply(
-        chatId,
-        userText,
-        undefined,
-        "qqbot"
-      );
-      await this.sendText(chatId, message.id, reply, eventType);
-    } catch (error) {
-      logger.error("qqbot.text.failed", {
-        messageId: message.id,
-        chatId: chatId,
-        error,
+      try {
+        const reply = await this.callbacks!.generateReply(
+          chatId,
+          userText,
+          undefined,
+          "qqbot"
+        );
+        await this.sendText(chatId, message.id, reply, eventType);
+      } catch (error) {
+        logger.error("qqbot.text.failed", {
+          messageId: message.id,
+          chatId: chatId,
+          error,
+        });
+        await this.sendText(chatId, message.id, "处理消息时出错了，请稍后再试。", eventType);
+      }
+    });
+  }
+
+  private enqueueChatTask(chatId: string, task: () => Promise<void>): void {
+    const previous = this.queueByChat.get(chatId) || Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(task)
+      .finally(() => {
+        if (this.queueByChat.get(chatId) === next) {
+          this.queueByChat.delete(chatId);
+        }
       });
-      await this.sendText(chatId, message.id, "处理消息时出错了，请稍后再试。", eventType);
-    }
+    this.queueByChat.set(chatId, next);
   }
 
   private async sendText(chatId: string, msgId: string, text: string, eventType: string): Promise<void> {

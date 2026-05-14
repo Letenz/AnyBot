@@ -228,22 +228,22 @@ export class FeishuChannel implements IChannel {
       return;
     }
 
-    const cmd = handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
-    if (cmd.handled) {
-      if (cmd.reply) await sendText(client, message.chat_id, cmd.reply);
-      return;
-    }
-
-    try {
-      await sendAckReaction(client, message.message_id, config.ackReaction);
-    } catch (error) {
-      logger.warn("feishu.ack_failed", {
-        messageId: message.message_id,
-        error,
-      });
-    }
-
     this.enqueueChatTask(message.chat_id, async () => {
+      const cmd = handleCommand(userText, message.chat_id, "feishu", this.callbacks!);
+      if (cmd.handled) {
+        if (cmd.reply) await sendText(client, message.chat_id, cmd.reply);
+        return;
+      }
+
+      try {
+        await sendAckReaction(client, message.message_id, config.ackReaction);
+      } catch (error) {
+        logger.warn("feishu.ack_failed", {
+          messageId: message.message_id,
+          error,
+        });
+      }
+
       try {
         const reply = await this.callbacks!.generateReply(
           message.chat_id,
