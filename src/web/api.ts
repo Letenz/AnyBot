@@ -320,7 +320,7 @@ export function chatRouter(): Router {
     };
 
     if (!channel) {
-      res.status(400).json({ error: "缺少 channel 参数（feishu / telegram / qqbot）" });
+      res.status(400).json({ error: "缺少 channel 参数（feishu / telegram / qqbot / weixin）" });
       return;
     }
     if (!message?.trim()) {

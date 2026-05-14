@@ -8,6 +8,7 @@ const BYPASS_DOMAINS = [
   ".feishu.cn",
   ".larksuite.com",
   ".qq.com",
+  ".weixin.qq.com",
   "localhost",
   "127.0.0.1",
   "::1",

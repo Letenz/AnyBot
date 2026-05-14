@@ -2,7 +2,7 @@
 
 # AnyBot
 
-Turn AI CLI tools into remotely accessible AI assistants — chat through the built-in **Web UI** in your browser, or message the AI running on your machine anytime via **Feishu Bot** / **QQ Bot** / **Telegram Bot** on mobile or desktop.
+Turn AI CLI tools into remotely accessible AI assistants — chat through the built-in **Web UI** in your browser, or message the AI running on your machine anytime via **Feishu Bot** / **QQ Bot** / **Telegram Bot** / **personal Weixin** on mobile or desktop.
 
 Currently supports [OpenAI Codex CLI](https://github.com/openai/codex), [Google Gemini CLI](https://github.com/google-gemini/gemini-cli), [Cursor CLI](https://docs.cursor.com/cli), [Qoder CLI](https://docs.qoder.com), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as Providers.
 
@@ -15,7 +15,7 @@ Supports **macOS** and **Linux**.
 - **Multi-Provider Architecture** — Pluggable AI backends; currently supports Codex CLI,Claude Code， Gemini CLI, Cursor CLI, Qoder CLI
 - **Web UI** — Built-in local chat interface with Markdown rendering, code highlighting, and session management
 - **Attachment Support** — Send files via the 📎 button, paste images, or drag-and-drop files in the Web UI (images + any file type, 50MB limit)
-- **Multi-Platform Integration** — Feishu (long connection), QQ Bot (WebSocket), and Telegram simultaneously — works on mobile too
+- **Multi-Platform Integration** — Feishu (long connection), QQ Bot (WebSocket), Telegram, and personal Weixin simultaneously — works on mobile too
 - **Proactive Messaging** — Push messages to channel owners via API, ideal for automation and notifications
 - **Skill Management** — Browse, enable/disable, and delete skills from the Web UI
 - **Proxy Configuration** — Configure HTTP / SOCKS5 proxies in the Web UI, with save and connectivity testing
@@ -179,7 +179,7 @@ Built-in web chat interface, no extra deployment needed:
   - Image attachments are automatically passed to the Provider for multimodal understanding
   - Non-image file paths are injected as context for the Provider to read and process
 - Provider and model switching
-- Channel configuration management (Feishu, QQ Bot, Telegram)
+- Channel configuration management (Feishu, QQ Bot, Telegram, Weixin)
 - Skill management (browse, enable/disable, delete)
 - Proxy settings (HTTP / SOCKS5, auth, connectivity testing)
 - Dark theme
@@ -207,7 +207,7 @@ Channel configs are stored in `.data/channels.json`. Three ways to manage:
 
 | Method | Description |
 |--------|-------------|
-| **Web UI** | Configure App ID / App Secret in the settings page after starting the service |
+| **Web UI** | Configure each channel in the settings page after starting the service |
 | **REST API** | `GET /api/channels` to view, `PUT /api/channels/:type` to update |
 | **Manual Edit** | Edit `.data/channels.json` directly |
 
@@ -235,6 +235,15 @@ Channel configs are stored in `.data/channels.json`. Three ways to manage:
     "enabled": true,
     "token": "1234567890:AA...",
     "ownerChatId": ""             // Optional; target chat ID for proactive messaging
+  },
+  "weixin": {
+    "enabled": true,
+    "accountId": "",              // Auto-filled after QR login
+    "token": "",                  // Auto-filled after QR login
+    "baseUrl": "https://ilinkai.weixin.qq.com",
+    "botType": "3",
+    "botAgent": "AnyBot/0.1.0",
+    "ownerChatId": ""             // Auto-filled from QR user or first inbound message
   }
 }
 ```
@@ -306,9 +315,31 @@ Like other channels, configure `telegram.token` through one of these methods:
 
 ---
 
+## Weixin Integration
+
+Connected through Tencent's Weixin channel protocol. AnyBot handles QR login, long-poll inbound messages, and outbound replies directly; OpenClaw is not required.
+
+### Connection Configuration
+
+1. Enable "Weixin" in the Web UI Channels page, or set `weixin.enabled` to `true` in `.data/channels.json`
+2. Restart AnyBot
+3. Scan the QR code printed in the terminal with personal Weixin
+4. After login, `weixin.accountId`, `weixin.token`, and `ownerChatId` are saved automatically
+
+If the login session expires, clear `weixin.token` and restart the service to scan again.
+
+### Usage
+
+- **Direct Message** — Send text messages through the bound personal Weixin account
+- **Proactive Messaging** — `/api/send` supports `{ "channel": "weixin", "message": "..." }`
+- The Weixin channel currently supports text messages first; media support can be added on top of the same protocol
+- All chat commands supported (see [Chat Commands](#chat-commands) below)
+
+---
+
 ## Chat Commands
 
-All channels (Feishu, QQ, Telegram) support the following `/` commands:
+All channels (Feishu, QQ, Telegram, Weixin) support the following `/` commands:
 
 | Command | Description |
 |---------|-------------|
@@ -507,7 +538,7 @@ curl -X POST http://localhost:19981/api/send \
   -d '{"channel": "telegram", "message": "Deployment complete ✅"}'
 ```
 
-`channel` can be `feishu`, `qqbot`, or `telegram`. You need to set `ownerChatId` in the corresponding channel configuration.
+`channel` can be `feishu`, `qqbot`, `telegram`, or `weixin`. You need to set `ownerChatId` in the corresponding channel configuration.
 
 ---
 
@@ -517,7 +548,7 @@ curl -X POST http://localhost:19981/api/send \
 - Session bindings are stored in SQLite; channel bindings are automatically rebuilt after process restart
 - Feishu messages receive a reaction (default ✅) to acknowledge receipt, then wait for the full Provider reply
 - QQ Bot receives messages via WebSocket gateway with automatic OAuth2 token management
-- When proxy is enabled, Provider and Telegram outbound requests go through the global proxy; Feishu, QQ, and local addresses bypass it by default
+- When proxy is enabled, Provider and Telegram outbound requests go through the global proxy; Feishu, QQ, Weixin, and local addresses bypass it by default
 - Text, image, and attachment messages are supported; other message types receive a prompt
 - Web UI attachments are uploaded via multer middleware to `tmp/uploads/` under the working directory
 - `/new` resets the current session, `/provider` and `/model` switch provider and model, `/help` shows command help
@@ -555,6 +586,7 @@ AnyBot/
 │   │   ├── feishu.ts       # Feishu channel implementation
 │   │   ├── qqbot.ts        # QQ Bot channel implementation
 │   │   ├── telegram.ts     # Telegram channel implementation
+│   │   ├── weixin.ts       # Weixin channel implementation
 │   │   ├── config.ts       # channels.json read/write
 │   │   └── types.ts        # Channel interface definitions (incl. sendToOwner)
 │   ├── web/                # Web layer

@@ -2,7 +2,7 @@
 
 # AnyBot
 
-把 AI CLI 工具变成可远程使用的 AI 助手——通过内置 **Web UI** 在浏览器里对话，或通过 **飞书机器人** / **QQ 机器人** / **Telegram 机器人** 在手机 / 桌面端随时向你这台机器上的 AI 发消息。
+把 AI CLI 工具变成可远程使用的 AI 助手——通过内置 **Web UI** 在浏览器里对话，或通过 **飞书机器人** / **QQ 机器人** / **Telegram 机器人** / **个人微信** 在手机 / 桌面端随时向你这台机器上的 AI 发消息。
 
 目前支持 [OpenAI Codex CLI](https://github.com/openai/codex)、[Google Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Cursor CLI](https://docs.cursor.com/cli)、[Qoder CLI](https://docs.qoder.com) 和 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 作为 Provider。
 
@@ -15,7 +15,7 @@
 - **多 Provider 架构** — 可插拔的 AI CLI 后端，当前支持 Codex CLI、Claude Code、Gemini CLI、Cursor CLI 、Qoder CLI，未来可扩展更多
 - **Web UI** — 开箱即用的本地聊天界面，支持 Markdown 渲染、代码高亮、会话管理
 - **附件支持** — Web UI 中通过 📎 按钮、粘贴图片或拖拽文件发送附件（图片 + 任意文件，50MB 上限）
-- **多平台集成** — 同时支持飞书（长连接）、QQ 机器人（WebSocket）、Telegram，手机上也能用
+- **多平台集成** — 同时支持飞书（长连接）、QQ 机器人（WebSocket）、Telegram、个人微信，手机上也能用
 - **主动推送** — 通过 API 主动向频道 Owner 发送消息，适合自动化通知场景
 - **技能管理** — 在 Web UI 中浏览、启用 / 禁用 / 删除技能
 - **代理配置** — 在 Web UI 中配置 HTTP / SOCKS5 代理，支持保存与连通性测试
@@ -179,7 +179,7 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
   - 图片附件自动传递给 Provider 做多模态理解
   - 非图片文件路径作为上下文传入，Provider 可读取处理
 - Provider 和模型切换
-- 频道配置管理（飞书、QQ 机器人、Telegram）
+- 频道配置管理（飞书、QQ 机器人、Telegram、微信）
 - 技能管理（浏览、启用 / 禁用、删除）
 - 代理设置（HTTP / SOCKS5、认证、连通性测试）
 - 深色主题
@@ -207,7 +207,7 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 
 | 方式 | 说明 |
 |------|------|
-| **Web UI** | 启动服务后在设置页面中配置 App ID / App Secret |
+| **Web UI** | 启动服务后在设置页面中按频道填写配置 |
 | **REST API** | `GET /api/channels` 查看、`PUT /api/channels/:type` 更新 |
 | **手动编辑** | 直接编辑 `.data/channels.json` |
 
@@ -235,6 +235,15 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
     "enabled": true,
     "token": "1234567890:AA...",
     "ownerChatId": ""             // 可选；主动推送的目标 chat ID
+  },
+  "weixin": {
+    "enabled": true,
+    "accountId": "",              // 扫码绑定后自动填入
+    "token": "",                  // 扫码绑定后自动填入
+    "baseUrl": "https://ilinkai.weixin.qq.com",
+    "botType": "3",
+    "botAgent": "AnyBot/0.1.0",
+    "ownerChatId": ""             // 可选；扫码用户或首次来信用户会自动填入
   }
 }
 ```
@@ -306,9 +315,31 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 
 ---
 
+## 微信集成
+
+通过腾讯微信通道协议接入个人微信，AnyBot 自己完成扫码登录、长轮询收消息和回复发送，不需要安装 OpenClaw。
+
+### 连接配置
+
+1. 在 Web UI 的“频道”页面启用“微信”，或编辑 `.data/channels.json` 中的 `weixin.enabled` 为 `true`
+2. 重启 AnyBot
+3. 终端会显示二维码，用个人微信扫码并在手机上确认
+4. 扫码成功后，`weixin.accountId`、`weixin.token` 和 `ownerChatId` 会自动写回配置
+
+如果登录态失效，清空 `weixin.token` 后重启服务即可重新扫码绑定。
+
+### 使用方式
+
+- **私聊** — 直接用绑定的个人微信收发文本消息
+- **主动推送** — `/api/send` 可使用 `{ "channel": "weixin", "message": "..." }`
+- 当前微信频道先支持文本消息；图片/文件协议已预留，后续可继续补齐
+- 支持所有聊天命令（见下方[聊天命令](#聊天命令)）
+
+---
+
 ## 聊天命令
 
-所有频道（飞书、QQ、Telegram）统一支持以下 `/` 命令：
+所有频道（飞书、QQ、Telegram、微信）统一支持以下 `/` 命令：
 
 | 命令 | 说明 |
 |------|------|
@@ -507,7 +538,7 @@ curl -X POST http://localhost:19981/api/send \
   -d '{"channel": "telegram", "message": "部署完成 ✅"}'
 ```
 
-`channel` 可选 `feishu`、`qqbot`、`telegram`，需要在对应频道配置中设置 `ownerChatId`。
+`channel` 可选 `feishu`、`qqbot`、`telegram`、`weixin`，需要在对应频道配置中设置 `ownerChatId`。
 
 ---
 
@@ -517,7 +548,7 @@ curl -X POST http://localhost:19981/api/send \
 - 会话绑定关系保存在 SQLite 中；各频道的绑定在进程重启后自动重建
 - 飞书消息先加一个 reaction（默认 ✅）表示已收到，再等待 Provider 完整回复
 - QQ 机器人通过 WebSocket 网关接收消息，OAuth2 自动管理 Token
-- 启用代理后，Provider 与 Telegram 等出站请求会走全局代理；飞书、QQ 和本机地址默认直连
+- 启用代理后，Provider 与 Telegram 等出站请求会走全局代理；飞书、QQ、微信和本机地址默认直连
 - 支持文本、图片和附件消息；其它消息类型会收到提示
 - Web UI 附件通过 multer 中间件上传到工作目录下的 `tmp/uploads/`
 - `/new` 重置当前会话，`/provider` 和 `/model` 切换供应商和模型，`/help` 查看命令帮助
@@ -555,6 +586,7 @@ AnyBot/
 │   │   ├── feishu.ts       # 飞书频道实现
 │   │   ├── qqbot.ts        # QQ 机器人频道实现
 │   │   ├── telegram.ts     # Telegram 频道实现
+│   │   ├── weixin.ts       # 微信频道实现
 │   │   ├── config.ts       # channels.json 读写
 │   │   └── types.ts        # 频道接口定义（含 sendToOwner 主动推送）
 │   ├── web/                # Web 层

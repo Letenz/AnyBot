@@ -3,6 +3,7 @@ import { readChannelsConfig } from "./config.js";
 import { FeishuChannel } from "./feishu.js";
 import { QQBotChannel } from "./qqbot.js";
 import { TelegramChannel } from "./telegram.js";
+import { WeixinChannel } from "./weixin.js";
 import { logger } from "../logger.js";
 
 type ChannelFactory = () => IChannel;
@@ -11,6 +12,7 @@ const channelFactories: Record<string, ChannelFactory> = {
   feishu: () => new FeishuChannel(),
   qqbot: () => new QQBotChannel(),
   telegram: () => new TelegramChannel(),
+  weixin: () => new WeixinChannel(),
 };
 
 export function getRegisteredChannelTypes(): string[] {
@@ -105,4 +107,12 @@ export async function startAllChannels(
 }
 
 export { readChannelsConfig, readChannelConfig, updateChannelConfig } from "./config.js";
-export type { IChannel, ChannelCallbacks, ChannelsConfig, ChannelConfig, FeishuChannelConfig, TelegramChannelConfig } from "./types.js";
+export type {
+  IChannel,
+  ChannelCallbacks,
+  ChannelsConfig,
+  ChannelConfig,
+  FeishuChannelConfig,
+  TelegramChannelConfig,
+  WeixinChannelConfig,
+} from "./types.js";

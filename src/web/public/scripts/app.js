@@ -786,6 +786,7 @@
             web: {name: '本地', icon: '本', iconClass: 'web', badge: '本地'},
             feishu: {name: '飞书', icon: '飞', iconClass: 'feishu', badge: '飞书'},
             qqbot: {name: 'QQ', icon: 'Q', iconClass: 'qq', badge: 'QQ'},
+            weixin: {name: '微信', icon: '微', iconClass: 'weixin', badge: '微信'},
             dingtalk: {name: '钉钉', icon: '钉', iconClass: 'dingtalk', badge: '钉钉'},
             telegram: {name: 'Telegram', icon: 'T', iconClass: 'telegram', badge: 'TG'},
             discord: {name: 'Discord', icon: 'D', iconClass: 'discord', badge: 'DC'},
@@ -1153,6 +1154,24 @@
                     '<label class="channel-drawer-field-label">Bot Token</label>' +
                     '<input class="channel-drawer-input" id="ch-token-' + type + '" type="password" value="' + escapeHtml(cfg.token || '') + '" placeholder="从 @BotFather 获取的 Token" spellcheck="false">' +
                     '</div>';
+            } else if (type === 'weixin') {
+                fieldsHtml =
+                    '<div class="channel-drawer-field">' +
+                    '<label class="channel-drawer-field-label">Bot Token <span style="font-weight:400;color:var(--text-dim)">(首次启用后扫码自动填入)</span></label>' +
+                    '<input class="channel-drawer-input" id="ch-token-' + type + '" type="password" value="' + escapeHtml(cfg.token || '') + '" placeholder="启用后重启服务并扫码绑定" spellcheck="false">' +
+                    '</div>' +
+                    '<div class="channel-drawer-field">' +
+                    '<label class="channel-drawer-field-label">Account ID</label>' +
+                    '<input class="channel-drawer-input" id="ch-account-' + type + '" value="' + escapeHtml(cfg.accountId || '') + '" placeholder="扫码后自动填入" spellcheck="false">' +
+                    '</div>' +
+                    '<div class="channel-drawer-field">' +
+                    '<label class="channel-drawer-field-label">Base URL</label>' +
+                    '<input class="channel-drawer-input" id="ch-baseurl-' + type + '" value="' + escapeHtml(cfg.baseUrl || 'https://ilinkai.weixin.qq.com') + '" placeholder="https://ilinkai.weixin.qq.com" spellcheck="false">' +
+                    '</div>' +
+                    '<div class="channel-drawer-field">' +
+                    '<label class="channel-drawer-field-label">Bot Agent</label>' +
+                    '<input class="channel-drawer-input" id="ch-agent-' + type + '" value="' + escapeHtml(cfg.botAgent || 'AnyBot/0.1.0') + '" placeholder="AnyBot/0.1.0" spellcheck="false">' +
+                    '</div>';
             } else {
                 fieldsHtml =
                     '<div class="channel-drawer-field">' +
@@ -1227,6 +1246,16 @@
             if (type === 'telegram') {
                 var tokenInput = document.getElementById('ch-token-' + type);
                 payload.token = tokenInput.value.trim();
+            } else if (type === 'weixin') {
+                var wxTokenInput = document.getElementById('ch-token-' + type);
+                var accountInput = document.getElementById('ch-account-' + type);
+                var baseUrlInput = document.getElementById('ch-baseurl-' + type);
+                var agentInput = document.getElementById('ch-agent-' + type);
+                payload.token = wxTokenInput.value.trim();
+                payload.accountId = accountInput.value.trim();
+                payload.baseUrl = baseUrlInput.value.trim() || 'https://ilinkai.weixin.qq.com';
+                payload.botAgent = agentInput.value.trim() || 'AnyBot/0.1.0';
+                payload.botType = '3';
             } else {
                 var appIdInput = document.getElementById('ch-appid-' + type);
                 var appSecretInput = document.getElementById('ch-secret-' + type);

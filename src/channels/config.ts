@@ -2,7 +2,13 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ChannelsConfig, FeishuChannelConfig, QQBotChannelConfig, TelegramChannelConfig } from "./types.js";
+import type {
+  ChannelsConfig,
+  FeishuChannelConfig,
+  QQBotChannelConfig,
+  TelegramChannelConfig,
+  WeixinChannelConfig,
+} from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_PATH = path.resolve(__dirname, "../../.data/channels.json");
@@ -28,6 +34,15 @@ const DEFAULT_CONFIG: ChannelsConfig = {
     token: "",
     ownerChatId: "",
   } satisfies TelegramChannelConfig,
+  weixin: {
+    enabled: false,
+    accountId: "",
+    token: "",
+    baseUrl: "https://ilinkai.weixin.qq.com",
+    botType: "3",
+    botAgent: "AnyBot/0.1.0",
+    ownerChatId: "",
+  } satisfies WeixinChannelConfig,
 };
 
 function ensureConfig(): void {

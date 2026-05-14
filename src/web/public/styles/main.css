@@ -1350,6 +1350,7 @@
 
         .channel-item-icon.feishu { background: rgba(51, 112, 255, 0.15); color: #3370ff; }
         .channel-item-icon.qq { background: rgba(18, 183, 245, 0.15); color: #12b7f5; }
+        .channel-item-icon.weixin { background: rgba(7, 193, 96, 0.15); color: #07c160; }
         .channel-item-icon.telegram { background: rgba(38, 166, 222, 0.15); color: #26a6de; }
         .channel-item-icon.dingtalk { background: rgba(0, 122, 255, 0.15); color: #007aff; }
         .channel-item-icon.discord { background: rgba(88, 101, 242, 0.15); color: #5865f2; }
@@ -1446,6 +1447,7 @@
 
         .channel-drawer-icon.feishu { background: rgba(51, 112, 255, 0.15); color: #3370ff; }
         .channel-drawer-icon.qq { background: rgba(18, 183, 245, 0.15); color: #12b7f5; }
+        .channel-drawer-icon.weixin { background: rgba(7, 193, 96, 0.15); color: #07c160; }
         .channel-drawer-icon.telegram { background: rgba(38, 166, 222, 0.15); color: #26a6de; }
         .channel-drawer-icon.dingtalk { background: rgba(0, 122, 255, 0.15); color: #007aff; }
         .channel-drawer-icon.discord { background: rgba(88, 101, 242, 0.15); color: #5865f2; }

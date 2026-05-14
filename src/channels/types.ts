@@ -23,11 +23,23 @@ export interface TelegramChannelConfig {
   [key: string]: unknown;
 }
 
+export interface WeixinChannelConfig {
+  enabled: boolean;
+  accountId: string;
+  token: string;
+  baseUrl: string;
+  botType: string;
+  botAgent: string;
+  ownerChatId?: string;
+  [key: string]: unknown;
+}
+
 export interface ChannelsConfig {
-  [channelType: string]: ChannelConfig | TelegramChannelConfig | undefined;
+  [channelType: string]: ChannelConfig | TelegramChannelConfig | WeixinChannelConfig | undefined;
   feishu?: FeishuChannelConfig;
   qqbot?: QQBotChannelConfig;
   telegram?: TelegramChannelConfig;
+  weixin?: WeixinChannelConfig;
 }
 
 export interface ProviderInfo {
