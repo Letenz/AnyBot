@@ -12,7 +12,7 @@ Supports **macOS** and **Linux**.
 
 ## Features
 
-- **Multi-Provider Architecture** — Pluggable AI backends; currently supports Codex CLI, Gemini CLI, Cursor CLI, Qoder CLI, and Claude Code
+- **Multi-Provider Architecture** — Pluggable AI backends; currently supports Codex CLI,Claude Code， Gemini CLI, Cursor CLI, Qoder CLI
 - **Web UI** — Built-in local chat interface with Markdown rendering, code highlighting, and session management
 - **Attachment Support** — Send files via the 📎 button, paste images, or drag-and-drop files in the Web UI (images + any file type, 50MB limit)
 - **Multi-Platform Integration** — Feishu (long connection), QQ Bot (WebSocket), and Telegram simultaneously — works on mobile too

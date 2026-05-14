@@ -12,7 +12,7 @@
 
 ## 特性
 
-- **多 Provider 架构** — 可插拔的 AI CLI 后端，当前支持 Codex CLI、Gemini CLI、Cursor CLI 和 Qoder CLI，未来可扩展更多
+- **多 Provider 架构** — 可插拔的 AI CLI 后端，当前支持 Codex CLI、Claude Code、Gemini CLI、Cursor CLI 、Qoder CLI，未来可扩展更多
 - **Web UI** — 开箱即用的本地聊天界面，支持 Markdown 渲染、代码高亮、会话管理
 - **附件支持** — Web UI 中通过 📎 按钮、粘贴图片或拖拽文件发送附件（图片 + 任意文件，50MB 上限）
 - **多平台集成** — 同时支持飞书（长连接）、QQ 机器人（WebSocket）、Telegram，手机上也能用
