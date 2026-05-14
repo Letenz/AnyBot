@@ -45,6 +45,21 @@
     padding: 12px 0 16px;
 }
 
+.claude-process-text {
+    margin: 8px 0 10px;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.75;
+}
+
+.claude-process-text > :first-child {
+    margin-top: 0;
+}
+
+.claude-process-text > :last-child {
+    margin-bottom: 0;
+}
+
 .claude-activity-summary {
     align-items: center;
     gap: 9px;

@@ -54,6 +54,8 @@
 
         var state = {
             answerText: '',
+            processTextSegments: [],
+            activeProcessTextSegment: null,
             tools: new Map(),
             readFiles: new Set(),
             searchCount: 0,
@@ -161,6 +163,64 @@
                 if (typeof hljs !== 'undefined') hljs.highlightElement(block);
             });
             scrollBottom();
+        }
+
+        function renderProcessTextSegment(segment) {
+            if (!segment.text) {
+                segment.el.remove();
+                return;
+            }
+            segment.el.innerHTML = renderMarkdown(segment.text);
+            segment.el.querySelectorAll('pre code').forEach(function (block) {
+                if (typeof hljs !== 'undefined') hljs.highlightElement(block);
+            });
+            scrollBottom();
+        }
+
+        function appendProcessText(text) {
+            if (!text) return;
+            var segment = state.activeProcessTextSegment;
+            if (!segment) {
+                var el = document.createElement('div');
+                el.className = 'claude-process-text';
+                segment = { el: el, text: '' };
+                state.processTextSegments.push(segment);
+                state.activeProcessTextSegment = segment;
+                activityList.appendChild(el);
+            }
+            segment.text += text;
+            renderProcessTextSegment(segment);
+        }
+
+        function removeFinalAnswerFromProcessText(finalText) {
+            var answerText = String(finalText).trim();
+            if (!answerText || state.processTextSegments.length === 0) return;
+
+            var fullText = state.processTextSegments.map(function (segment) {
+                return segment.text;
+            }).join('');
+            var processText = fullText.trimEnd();
+            if (!processText.endsWith(answerText)) return;
+
+            var keepText = processText.slice(0, processText.length - answerText.length).trimEnd();
+            var keepLength = keepText.length;
+            var offset = 0;
+
+            state.processTextSegments.slice().forEach(function (segment) {
+                var nextOffset = offset + segment.text.length;
+                if (offset >= keepLength) {
+                    segment.text = '';
+                } else if (nextOffset > keepLength) {
+                    segment.text = segment.text.slice(0, keepLength - offset).trimEnd();
+                }
+                offset = nextOffset;
+                renderProcessTextSegment(segment);
+            });
+
+            state.processTextSegments = state.processTextSegments.filter(function (segment) {
+                return !!segment.text;
+            });
+            state.activeProcessTextSegment = null;
         }
 
         function classifyTool(tool) {
@@ -317,12 +377,13 @@
             }
 
             if (event.type === 'answer_delta') {
-                state.answerText += event.text || '';
-                renderAnswer();
+                appendProcessText(event.text || '');
+                process.open = true;
                 return;
             }
 
             if (event.type === 'result') {
+                removeFinalAnswerFromProcessText(event.content);
                 state.answerText = event.content || state.answerText;
                 renderAnswer();
                 state.status = 'completed';
@@ -350,6 +411,7 @@
             }
 
             if (event.type === 'tool_start') {
+                state.activeProcessTextSegment = null;
                 ensureTool(event.tool);
                 process.open = true;
                 return;

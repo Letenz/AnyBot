@@ -494,7 +494,7 @@ export function chatRouter(): Router {
 
     const agentEvents: ClaudeAgentStreamEvent[] = [];
     const emit = (event: ClaudeAgentStreamEvent | { type: "result"; content: string; title: string; sessionId: string | null } | { type: "error"; error: string }) => {
-      if (event.type !== "answer_delta" && event.type !== "result" && event.type !== "error") {
+      if (event.type !== "result" && event.type !== "error") {
         agentEvents.push(event);
       }
       if (!closed) writeSse(res, event.type, event);
