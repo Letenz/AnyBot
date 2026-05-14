@@ -17,6 +17,14 @@ import {
   ProviderProcessError,
   ProviderEmptyOutputError,
 } from "./codex.js";
+import {
+  createFileChangeEvent,
+  createToolEndEvent,
+  createToolProgressEvent,
+  createToolStartEvent,
+  extractAssistantTextDelta,
+  type ClaudeAgentStreamEvent,
+} from "./claude-code-agent-events.js";
 import { logger } from "../logger.js";
 import type { SandboxMode } from "../types.js";
 
@@ -112,6 +120,21 @@ export class ClaudeCodeProvider implements IProvider {
   }
 
   async run(opts: RunOptions): Promise<RunResult> {
+    return this.execute(opts);
+  }
+
+  async runWithEvents(
+    opts: RunOptions & {
+      onEvent: (event: ClaudeAgentStreamEvent) => void | Promise<void>;
+    },
+  ): Promise<RunResult> {
+    return this.execute(opts, opts.onEvent);
+  }
+
+  private async execute(
+    opts: RunOptions,
+    onEvent?: (event: ClaudeAgentStreamEvent) => void | Promise<void>,
+  ): Promise<RunResult> {
     const {
       workdir,
       prompt,
@@ -156,6 +179,61 @@ export class ClaudeCodeProvider implements IProvider {
         delete env.ANTHROPIC_API_KEY;
       }
 
+      await onEvent?.({
+        type: "agent_status",
+        status: "started",
+        message: "Claude Code Agent 已启动",
+      });
+
+      const hooks: Options["hooks"] | undefined = onEvent
+        ? {
+            PreToolUse: [
+              {
+                hooks: [
+                  async (input) => {
+                    const event = createToolStartEvent(input);
+                    if (event) await onEvent(event);
+                    return {};
+                  },
+                ],
+              },
+            ],
+            PostToolUse: [
+              {
+                hooks: [
+                  async (input) => {
+                    const event = await createToolEndEvent(input, workdir);
+                    if (event) await onEvent(event);
+                    return {};
+                  },
+                ],
+              },
+            ],
+            PostToolUseFailure: [
+              {
+                hooks: [
+                  async (input) => {
+                    const event = await createToolEndEvent(input, workdir);
+                    if (event) await onEvent(event);
+                    return {};
+                  },
+                ],
+              },
+            ],
+            FileChanged: [
+              {
+                hooks: [
+                  async (input) => {
+                    const event = await createFileChangeEvent(input, workdir);
+                    if (event) await onEvent(event);
+                    return {};
+                  },
+                ],
+              },
+            ],
+          }
+        : undefined;
+
       const stream = query({
         prompt,
         options: {
@@ -170,11 +248,25 @@ export class ClaudeCodeProvider implements IProvider {
           allowDangerouslySkipPermissions: permissionMode === "bypassPermissions",
           allowedTools: buildAllowedTools(sandbox),
           sandbox: buildSandboxOptions(sandbox, workdir),
+          includePartialMessages: !!onEvent,
+          hooks,
           env,
         },
       });
 
       for await (const message of stream) {
+        if (onEvent) {
+          const delta = extractAssistantTextDelta(message);
+          if (delta) {
+            await onEvent({ type: "answer_delta", text: delta });
+          }
+
+          const progress = createToolProgressEvent(message);
+          if (progress) {
+            await onEvent(progress);
+          }
+        }
+
         if (isSdkResultMessage(message)) {
           resultMessage = message;
         }
@@ -232,6 +324,14 @@ export class ClaudeCodeProvider implements IProvider {
         totalCostUsd: resultMessage.total_cost_usd,
       });
 
+      await onEvent?.({
+        type: "agent_status",
+        status: "completed",
+        message: "Claude Code Agent 已完成",
+        sessionId: resultMessage.session_id,
+        durationMs: Date.now() - startedAt,
+      });
+
       return {
         text: responseText,
         sessionId: resultMessage.session_id,
@@ -255,6 +355,12 @@ export class ClaudeCodeProvider implements IProvider {
         sandbox,
         durationMs: Date.now() - startedAt,
         error: err,
+      });
+      await onEvent?.({
+        type: "agent_status",
+        status: "failed",
+        message: err instanceof Error ? err.message : "Claude Code Agent 执行失败",
+        durationMs: Date.now() - startedAt,
       });
       throw err;
     }

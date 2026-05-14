@@ -33,12 +33,33 @@ import {
   getWorkdir,
   getSandbox,
 } from "../shared.js";
+import type { ClaudeCodeProvider } from "../providers/claude-code.js";
+import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
 
 function isImageFile(filePath: string): boolean {
   return IMAGE_EXTS.has(path.extname(filePath).toLowerCase());
+}
+
+function writeSse(res: Response, event: string, data: unknown): void {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function isClaudeStreamingProvider(provider: ReturnType<typeof getProvider>): provider is ClaudeCodeProvider {
+  return provider.type === "claude-code" && typeof (provider as ClaudeCodeProvider).runWithEvents === "function";
+}
+
+function buildClaudeAgentMetadata(events: ClaudeAgentStreamEvent[]): string {
+  return JSON.stringify({
+    claudeAgentLoop: {
+      version: 1,
+      provider: "claude-code",
+      events,
+    },
+  });
 }
 
 // 上传目录：使用配置的工作目录
@@ -402,6 +423,142 @@ export function chatRouter(): Router {
   });
 
   // --- Chat messages ---
+
+  router.post("/sessions/:id/messages/stream", async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const session = db.getSession(id);
+    if (!session) {
+      res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+
+    const provider = getProvider();
+    if (session.source !== "web" || !isClaudeStreamingProvider(provider)) {
+      res.status(409).json({ error: "当前会话或 Provider 不支持 Claude Code Agent 流式展示" });
+      return;
+    }
+
+    const { content, attachments } = req.body as {
+      content?: string;
+      attachments?: { path: string; name: string }[];
+    };
+    if (!content?.trim() && (!attachments || attachments.length === 0)) {
+      res.status(400).json({ error: "消息不能为空" });
+      return;
+    }
+
+    let userText = (content || "").trim();
+    const imagePaths: string[] = [];
+    const filePaths: { path: string; name: string }[] = [];
+
+    if (attachments && attachments.length > 0) {
+      for (const att of attachments) {
+        if (isImageFile(att.name)) {
+          imagePaths.push(att.path);
+        } else {
+          filePaths.push(att);
+        }
+      }
+      if (filePaths.length > 0) {
+        const fileList = filePaths.map(f => `- ${f.name}: ${f.path}`).join("\n");
+        userText = `${userText}\n\n用户附带了以下文件，请读取并处理：\n${fileList}`;
+      }
+      if (imagePaths.length > 0) {
+        const imgList = imagePaths.map(p => `- ${path.basename(p)}: ${p}`).join("\n");
+        userText = `${userText}\n\n用户附带了以下图片：\n${imgList}`;
+      }
+    }
+
+    const attachmentInfo = (attachments || []).map(a => ({ name: a.name, path: a.path }));
+    const metadata = attachmentInfo.length > 0 ? JSON.stringify({ attachments: attachmentInfo }) : null;
+
+    db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
+
+    if (session.messages.length <= 1) {
+      session.title = generateTitle(content?.trim() || "文件分析");
+    }
+
+    const prompt = session.sessionId
+      ? buildResumePrompt(userText)
+      : buildFirstTurnPrompt(userText);
+
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    let closed = false;
+    res.on("close", () => {
+      closed = true;
+    });
+
+    const agentEvents: ClaudeAgentStreamEvent[] = [];
+    const emit = (event: ClaudeAgentStreamEvent | { type: "result"; content: string; title: string; sessionId: string | null } | { type: "error"; error: string }) => {
+      if (event.type !== "answer_delta" && event.type !== "result" && event.type !== "error") {
+        agentEvents.push(event);
+      }
+      if (!closed) writeSse(res, event.type, event);
+    };
+
+    try {
+      logger.info("web.chat.stream.start", {
+        sessionId: session.id,
+        providerSessionId: session.sessionId,
+        provider: provider.type,
+        userTextChars: userText.length,
+        imageCount: imagePaths.length,
+        fileCount: filePaths.length,
+      });
+
+      const result = await provider.runWithEvents({
+        workdir: getWorkdir(),
+        sandbox: getSandbox(),
+        model: getCurrentModel(),
+        prompt,
+        imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
+        sessionId: session.sessionId || undefined,
+        newSessionId: session.sessionId ? undefined : randomUUID(),
+        onEvent: emit,
+      });
+
+      const providerSessionId = result.sessionId || session.sessionId;
+      db.addMessage(id, "assistant", result.text, buildClaudeAgentMetadata(agentEvents));
+      db.updateSession({
+        id,
+        title: session.title,
+        sessionId: providerSessionId,
+        updatedAt: Date.now(),
+      });
+
+      emit({
+        type: "result",
+        content: result.text,
+        title: session.title,
+        sessionId: providerSessionId,
+      });
+
+      logger.info("web.chat.stream.success", {
+        sessionId: session.id,
+        providerSessionId,
+        provider: provider.type,
+        replyChars: result.text.length,
+      });
+    } catch (error) {
+      logger.error("web.chat.stream.failed", {
+        sessionId: session.id,
+        error,
+      });
+      emit({
+        type: "error",
+        error: error instanceof Error ? error.message : "处理消息时出错了，请稍后再试。",
+      });
+    } finally {
+      if (!closed) {
+        writeSse(res, "done", { type: "done" });
+        res.end();
+      }
+    }
+  });
 
   router.post("/sessions/:id/messages", async (req: Request, res: Response) => {
     const id = req.params.id as string;

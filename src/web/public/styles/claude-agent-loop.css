@@ -1,0 +1,234 @@
+.message-row.ai .message-content.claude-agent-message {
+    width: min(860px, 100%);
+}
+
+.claude-process {
+    margin: 0 0 18px;
+    border-bottom: 1px solid var(--border);
+}
+
+.claude-process-summary {
+    list-style: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0 11px;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.claude-process-summary::-webkit-details-marker {
+    display: none;
+}
+
+.claude-process-title {
+    font-size: 15px;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+.claude-process-chevron {
+    display: inline-flex;
+    color: var(--text-muted);
+    font-size: 17px;
+    line-height: 1;
+    transform: translateY(1px);
+    transition: transform 0.16s ease;
+}
+
+.claude-process[open] .claude-process-chevron {
+    transform: rotate(90deg) translateY(1px);
+}
+
+.claude-process-body {
+    padding: 12px 0 16px;
+}
+
+.claude-activity-summary {
+    align-items: center;
+    gap: 9px;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 10px;
+}
+
+.claude-activity-icon {
+    width: 16px;
+    height: 16px;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    line-height: 1;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.claude-activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.claude-activity-item {
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+}
+
+.claude-activity-item.failed {
+    color: #f87171;
+}
+
+.claude-activity-item.shell {
+    display: block;
+}
+
+.claude-activity-item.shell > summary {
+    list-style: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.claude-activity-item.shell > summary::-webkit-details-marker {
+    display: none;
+}
+
+.claude-activity-text {
+    color: inherit;
+}
+
+.claude-activity-chevron {
+    color: var(--text-muted);
+    font-size: 14px;
+    transform: translateY(1px);
+    transition: transform 0.16s ease;
+}
+
+.claude-activity-item.shell[open] .claude-activity-chevron {
+    transform: rotate(90deg) translateY(1px);
+}
+
+.claude-shell-block {
+    margin-top: 10px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 12px 14px;
+    color: var(--text-muted);
+}
+
+.claude-shell-title {
+    font-size: 12px;
+    margin-bottom: 10px;
+}
+
+.claude-shell-block pre {
+    margin: 0 0 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+}
+
+.claude-shell-block pre:last-child {
+    margin-bottom: 0;
+}
+
+.claude-shell-block pre.stderr {
+    color: #fca5a5;
+}
+
+.claude-shell-empty {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin: 8px 0 22px;
+}
+
+.claude-shell-status {
+    text-align: right;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+.claude-activity-error {
+    margin-top: 4px;
+    color: #fca5a5;
+    font-size: 12px;
+}
+
+.claude-inline-diff {
+    margin-top: 8px;
+}
+
+.claude-inline-diff summary {
+    list-style: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.claude-inline-diff summary::-webkit-details-marker {
+    display: none;
+}
+
+.claude-inline-diff pre {
+    margin: 8px 0 0;
+    max-height: 260px;
+    overflow: auto;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 10px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--text-muted);
+}
+
+.claude-inline-diff span {
+    display: block;
+}
+
+.claude-inline-diff .add {
+    color: #86efac;
+}
+
+.claude-inline-diff .del {
+    color: #fca5a5;
+}
+
+.claude-inline-diff .hunk {
+    color: #a78bfa;
+}
+
+.claude-final-answer {
+    min-height: 24px;
+}
+
+.typing-indicator.compact {
+    padding: 3px 0;
+}
+
+@media (max-width: 720px) {
+    .message-row.ai .message-content.claude-agent-message {
+        width: 100%;
+    }
+
+    .claude-process-title {
+        font-size: 14px;
+    }
+
+    .claude-shell-block {
+        padding: 10px 12px;
+    }
+}

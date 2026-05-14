@@ -414,6 +414,15 @@
             }, 4000);
         }
 
+        function parseMessageMetadata(raw) {
+            if (!raw) return {};
+            try {
+                return JSON.parse(raw) || {};
+            } catch (_) {
+                return {};
+            }
+        }
+
         function groupSessionsByDate(list) {
             var now = new Date();
             var today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -539,13 +548,19 @@
                 } else {
                     data.messages.forEach(function (m) {
                         var attInfo = null;
-                        if (m.metadata) {
-                            try {
-                                var meta = JSON.parse(m.metadata);
-                                if (meta.attachments && meta.attachments.length > 0) {
-                                    attInfo = meta.attachments;
-                                }
-                            } catch (_) {}
+                        var meta = parseMessageMetadata(m.metadata);
+                        if (meta.attachments && meta.attachments.length > 0) {
+                            attInfo = meta.attachments;
+                        }
+                        if (m.role === 'assistant' && meta.claudeAgentLoop && window.ClaudeAgentLoop && window.ClaudeAgentLoop.renderPersistedMessage) {
+                            clearEmpty();
+                            window.ClaudeAgentLoop.renderPersistedMessage({
+                                messagesEl: messagesEl,
+                                scrollBottom: scrollBottom,
+                                content: m.content,
+                                loop: meta.claudeAgentLoop,
+                            });
+                            return;
                         }
                         appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo);
                     });
@@ -600,7 +615,30 @@
                 });
             }
 
+            var agentView = null;
             try {
+                if (window.ClaudeAgentLoop && window.ClaudeAgentLoop.canStream(providerData)) {
+                    removeTyping();
+                    agentView = window.ClaudeAgentLoop.createMessage({
+                        messagesEl: messagesEl,
+                        scrollBottom: scrollBottom,
+                    });
+                    var streamResult = await window.ClaudeAgentLoop.stream({
+                        sessionId: currentSessionId,
+                        body: body,
+                        view: agentView,
+                    });
+                    if (!streamResult.fallback) {
+                        await fetchSessions();
+                        isTyping = false;
+                        updateSendBtnState();
+                        return;
+                    }
+                    if (agentView && agentView.row) agentView.row.remove();
+                    agentView = null;
+                    showTyping();
+                }
+
                 var res = await fetch('/api/sessions/' + currentSessionId + '/messages', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -624,7 +662,13 @@
                 await fetchSessions();
             } catch (e) {
                 removeTyping();
-                showError('网络错误，请检查连接');
+                if (agentView) {
+                    agentView.handleEvent({
+                        type: 'error',
+                        error: e.message || '网络错误，请检查连接',
+                    });
+                }
+                showError(e.message || '网络错误，请检查连接');
             }
 
             isTyping = false;
