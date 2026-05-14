@@ -19,6 +19,9 @@ interface SkillSource {
   dir: string;
 }
 
+const SKILL_FILE = "SKILL.md";
+const DISABLED_SKILL_FILE = "SKILL.md.disabled";
+
 const PROVIDER_SKILL_DIRS: Record<string, () => SkillSource[]> = {
   codex: () => {
     const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
@@ -92,8 +95,8 @@ function parseSkillMd(content: string): { name: string; description: string } {
   return result;
 }
 
-function scanSkillDir(dir: string): Array<{ name: string; skillPath: string }> {
-  const results: Array<{ name: string; skillPath: string }> = [];
+function scanSkillDir(dir: string): Array<{ name: string; skillPath: string; enabled: boolean }> {
+  const results: Array<{ name: string; skillPath: string; enabled: boolean }> = [];
 
   function scan(currentDir: string): void {
     try {
@@ -101,9 +104,12 @@ function scanSkillDir(dir: string): Array<{ name: string; skillPath: string }> {
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
         const subDir = path.join(currentDir, entry.name);
-        const skillMd = path.join(subDir, "SKILL.md");
+        const skillMd = path.join(subDir, SKILL_FILE);
+        const disabledSkillMd = path.join(subDir, DISABLED_SKILL_FILE);
         if (fs.existsSync(skillMd)) {
-          results.push({ name: entry.name, skillPath: skillMd });
+          results.push({ name: entry.name, skillPath: skillMd, enabled: true });
+        } else if (fs.existsSync(disabledSkillMd)) {
+          results.push({ name: entry.name, skillPath: disabledSkillMd, enabled: false });
         } else if (entry.name.startsWith(".")) {
           scan(subDir);
         }
@@ -128,9 +134,24 @@ export function listSkills(): { skills: SkillInfo[]; sources: Array<{ label: str
     sourceStats.push({ label: source.label, dir: source.dir, count: found.length });
 
     for (const item of found) {
+      const id = `${source.label}::${item.name}`;
+
+      if (item.enabled && disabled.has(id)) {
+        const skillDir = path.dirname(item.skillPath);
+        const disabledPath = path.join(skillDir, DISABLED_SKILL_FILE);
+        try {
+          if (!fs.existsSync(disabledPath)) {
+            fs.renameSync(item.skillPath, disabledPath);
+            item.skillPath = disabledPath;
+            item.enabled = false;
+          }
+        } catch {
+          // Keep reporting the actual file state if migration cannot be applied.
+        }
+      }
+
       const content = fs.readFileSync(item.skillPath, "utf-8");
       const meta = parseSkillMd(content);
-      const id = `${source.label}::${item.name}`;
 
       skills.push({
         id,
@@ -138,7 +159,7 @@ export function listSkills(): { skills: SkillInfo[]; sources: Array<{ label: str
         description: meta.description || "",
         fullPath: item.skillPath,
         source: source.label,
-        enabled: !disabled.has(id),
+        enabled: item.enabled,
         content,
       });
     }
@@ -148,7 +169,30 @@ export function listSkills(): { skills: SkillInfo[]; sources: Array<{ label: str
   return { skills, sources: sourceStats };
 }
 
-export function toggleSkill(id: string, enabled: boolean): void {
+export function toggleSkill(id: string, enabled: boolean): { ok: boolean; error?: string } {
+  const { skills } = listSkills();
+  const skill = skills.find((s) => s.id === id);
+  if (!skill) return { ok: false, error: "技能不存在" };
+  if (skill.enabled === enabled) return { ok: true };
+
+  const skillDir = path.dirname(skill.fullPath);
+  const enabledPath = path.join(skillDir, SKILL_FILE);
+  const disabledPath = path.join(skillDir, DISABLED_SKILL_FILE);
+
+  try {
+    if (enabled) {
+      if (!fs.existsSync(disabledPath)) return { ok: false, error: "禁用状态文件不存在" };
+      if (fs.existsSync(enabledPath)) return { ok: false, error: "启用状态文件已存在" };
+      fs.renameSync(disabledPath, enabledPath);
+    } else {
+      if (!fs.existsSync(enabledPath)) return { ok: false, error: "启用状态文件不存在" };
+      if (fs.existsSync(disabledPath)) return { ok: false, error: "禁用状态文件已存在" };
+      fs.renameSync(enabledPath, disabledPath);
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "切换失败" };
+  }
+
   const disabled = readDisabledSkills();
   if (enabled) {
     disabled.delete(id);
@@ -156,6 +200,7 @@ export function toggleSkill(id: string, enabled: boolean): void {
     disabled.add(id);
   }
   writeDisabledSkills(disabled);
+  return { ok: true };
 }
 
 export function deleteSkill(id: string): { ok: boolean; error?: string } {
@@ -207,11 +252,18 @@ export function openSkillsFolder(skillPath?: string): void {
       if (entry.name.startsWith(".")) {
         try {
           const inner = fs.readdirSync(sub, { withFileTypes: true });
-          if (inner.some((e) => e.isDirectory() && fs.existsSync(path.join(sub, e.name, "SKILL.md")))) {
+          if (
+            inner.some(
+              (e) =>
+                e.isDirectory() &&
+                (fs.existsSync(path.join(sub, e.name, SKILL_FILE)) ||
+                  fs.existsSync(path.join(sub, e.name, DISABLED_SKILL_FILE))),
+            )
+          ) {
             dirs.add(sub);
           }
         } catch {}
-      } else if (fs.existsSync(path.join(sub, "SKILL.md"))) {
+      } else if (fs.existsSync(path.join(sub, SKILL_FILE)) || fs.existsSync(path.join(sub, DISABLED_SKILL_FILE))) {
         dirs.add(baseDir);
       }
     }

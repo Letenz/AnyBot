@@ -1634,9 +1634,13 @@
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled: newState }),
-                }).then(function () {
+                }).then(function (res) {
+                    if (!res.ok) throw new Error('toggle failed');
                     showSaveStatus(newState ? '已启用: ' + skill.name : '已禁用: ' + skill.name);
                 }).catch(function () {
+                    toggle.classList.toggle('on', !newState);
+                    toggle.title = !newState ? '点击禁用' : '点击启用';
+                    skill.enabled = !newState;
                     showError('切换技能状态失败');
                 });
             });

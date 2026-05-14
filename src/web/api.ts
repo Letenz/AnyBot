@@ -211,7 +211,11 @@ export function chatRouter(): Router {
       return;
     }
     try {
-      toggleSkill(id, enabled);
+      const result = toggleSkill(id, enabled);
+      if (!result.ok) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
       logger.info("skill.toggled", { id, enabled });
       res.json({ ok: true });
     } catch (error) {
