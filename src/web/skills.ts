@@ -28,7 +28,7 @@ const PROVIDER_SKILL_DIRS: Record<string, () => SkillSource[]> = {
     return [{ label: "Codex 技能", dir: path.join(codexHome, "skills") }];
   },
   "claude-code": () => {
-    return [{ label: "Claude Code 规则", dir: path.join(os.homedir(), ".claude") }];
+    return [{ label: "Claude Code 技能", dir: path.join(os.homedir(), ".claude", "skills") }];
   },
   "gemini-cli": () => {
     return [{ label: "Gemini CLI 技能", dir: path.join(os.homedir(), ".agents", "skills") }];
@@ -95,6 +95,17 @@ function parseSkillMd(content: string): { name: string; description: string } {
   return result;
 }
 
+function isDirectoryLike(dir: string, entry: fs.Dirent): boolean {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+
+  try {
+    return fs.statSync(path.join(dir, entry.name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 function scanSkillDir(dir: string): Array<{ name: string; skillPath: string; enabled: boolean }> {
   const results: Array<{ name: string; skillPath: string; enabled: boolean }> = [];
 
@@ -102,7 +113,7 @@ function scanSkillDir(dir: string): Array<{ name: string; skillPath: string; ena
     try {
       const entries = fs.readdirSync(currentDir, { withFileTypes: true });
       for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
+        if (!isDirectoryLike(currentDir, entry)) continue;
         const subDir = path.join(currentDir, entry.name);
         const skillMd = path.join(subDir, SKILL_FILE);
         const disabledSkillMd = path.join(subDir, DISABLED_SKILL_FILE);
@@ -255,7 +266,7 @@ export function openSkillsFolder(skillPath?: string): void {
           if (
             inner.some(
               (e) =>
-                e.isDirectory() &&
+                isDirectoryLike(sub, e) &&
                 (fs.existsSync(path.join(sub, e.name, SKILL_FILE)) ||
                   fs.existsSync(path.join(sub, e.name, DISABLED_SKILL_FILE))),
             )

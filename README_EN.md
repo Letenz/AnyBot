@@ -369,7 +369,7 @@ After switching Providers, the skill list automatically switches to the correspo
 |----------|----------------|
 | `codex` | `~/.codex/skills/` |
 | `gemini-cli` | `~/.gemini/` |
-| `claude-code` | `~/.claude/` |
+| `claude-code` | `~/.claude/skills/` |
 | `cursor-cli` | `./.cursor/rules/` |
 | `qoder-cli` | `~/.qoder/agents/` |
 

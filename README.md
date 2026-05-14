@@ -369,7 +369,7 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 |----------|---------|
 | `codex` | `~/.codex/skills/` |
 | `gemini-cli` | `~/.gemini/` |
-| `claude-code` | `~/.claude/` |
+| `claude-code` | `~/.claude/skills/` |
 | `cursor-cli` | `./.cursor/rules/` |
 | `qoder-cli` | `~/.qoder/agents/` |
 
