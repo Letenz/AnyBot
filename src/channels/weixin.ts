@@ -99,6 +99,24 @@ interface LoginResult {
   ownerChatId?: string;
 }
 
+export interface WeixinLoginStatus {
+  state: "idle" | "pending" | "scanned" | "waiting_code" | "confirmed" | "failed";
+  message: string;
+  qrcodeUrl?: string;
+  qrcodeDataUrl?: string;
+  startedAt?: number;
+  updatedAt?: number;
+}
+
+let loginStatus: WeixinLoginStatus = {
+  state: "idle",
+  message: "微信频道未开始登录",
+};
+
+export function getWeixinLoginStatus(): WeixinLoginStatus {
+  return loginStatus;
+}
+
 export class WeixinChannel implements IChannel {
   readonly type = "weixin";
 
@@ -174,7 +192,23 @@ export class WeixinChannel implements IChannel {
 
   private async loginWithQr(): Promise<LoginResult> {
     const botType = this.config?.botType || DEFAULT_BOT_TYPE;
-    const qr = await this.fetchQRCode(botType);
+    let qr: QRCodeResponse;
+    let qrcodeDataUrl: string | undefined;
+    try {
+      qr = await this.fetchQRCode(botType);
+      qrcodeDataUrl = await generateQRCodeDataUrl(qr.qrcode_img_content);
+    } catch (error) {
+      const message = `微信二维码生成失败：${error instanceof Error ? error.message : String(error)}`;
+      setWeixinLoginStatus({ state: "failed", message });
+      throw error;
+    }
+    setWeixinLoginStatus({
+      state: "pending",
+      message: "请用个人微信扫码绑定 AnyBot",
+      qrcodeUrl: qr.qrcode_img_content,
+      qrcodeDataUrl,
+      startedAt: Date.now(),
+    });
     logger.info("weixin.login.qr_url", { url: qr.qrcode_img_content });
     console.log("\n[AnyBot 微信] 请用个人微信扫描以下二维码完成绑定：\n");
     displayQRCode(qr.qrcode_img_content);
@@ -194,11 +228,19 @@ export class WeixinChannel implements IChannel {
         case "scaned":
           verifyCode = undefined;
           if (!scannedPrinted) {
+            setWeixinLoginStatus({
+              state: "scanned",
+              message: "已扫码，请在手机微信上确认",
+            });
             console.log("[AnyBot 微信] 已扫码，等待手机确认...");
             scannedPrinted = true;
           }
           break;
         case "need_verifycode":
+          setWeixinLoginStatus({
+            state: "waiting_code",
+            message: "手机微信要求输入数字验证码，请在终端输入",
+          });
           verifyCode = await readVerifyCodeFromStdin(
             verifyCode ? "验证码不匹配，请重新输入手机微信显示的数字：" : "请输入手机微信显示的数字：",
           );
@@ -210,15 +252,29 @@ export class WeixinChannel implements IChannel {
           }
           break;
         case "verify_code_blocked":
+          setWeixinLoginStatus({ state: "failed", message: "微信扫码验证码多次错误，请稍后重试" });
           throw new Error("微信扫码验证码多次错误，请稍后重试");
         case "expired":
+          setWeixinLoginStatus({ state: "failed", message: "微信登录二维码已过期，请重启 AnyBot 后重新扫码" });
           throw new Error("微信登录二维码已过期，请重启 AnyBot 后重新扫码");
         case "binded_redirect":
+          setWeixinLoginStatus({
+            state: "failed",
+            message: "此微信已绑定过，但本地没有可用 token，请重新发起绑定或清理旧绑定后再试",
+          });
           throw new Error("此微信已绑定过，但本地没有可用 token，请重新发起绑定或清理旧绑定后再试");
         case "confirmed":
           if (!status.bot_token || !status.ilink_bot_id) {
+            setWeixinLoginStatus({
+              state: "failed",
+              message: "微信登录成功但服务端未返回 bot_token 或 ilink_bot_id",
+            });
             throw new Error("微信登录成功但服务端未返回 bot_token 或 ilink_bot_id");
           }
+          setWeixinLoginStatus({
+            state: "confirmed",
+            message: "微信绑定成功",
+          });
           console.log("[AnyBot 微信] 绑定成功。");
           return {
             accountId: status.ilink_bot_id,
@@ -230,6 +286,7 @@ export class WeixinChannel implements IChannel {
       await sleep(1000);
     }
 
+    setWeixinLoginStatus({ state: "failed", message: "微信登录超时，请重启 AnyBot 后重新扫码" });
     throw new Error("微信登录超时，请重启 AnyBot 后重新扫码");
   }
 
@@ -587,6 +644,31 @@ function displayQRCode(qrcodeUrl: string): void {
   } catch {
     // The URL is printed by the caller as a fallback.
   }
+}
+
+async function generateQRCodeDataUrl(qrcodeUrl: string): Promise<string | undefined> {
+  try {
+    const qrcode = require("qrcode") as {
+      toDataURL: (input: string, opts?: Record<string, unknown>) => Promise<string>;
+    };
+    return await qrcode.toDataURL(qrcodeUrl, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 260,
+      color: { dark: "#111827", light: "#ffffff" },
+    });
+  } catch (error) {
+    logger.warn("weixin.qrcode_data_url.failed", { error });
+    return undefined;
+  }
+}
+
+function setWeixinLoginStatus(next: Partial<WeixinLoginStatus>): void {
+  loginStatus = {
+    ...loginStatus,
+    ...next,
+    updatedAt: Date.now(),
+  };
 }
 
 async function readVerifyCodeFromStdin(prompt: string): Promise<string> {

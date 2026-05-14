@@ -20,6 +20,7 @@ import {
   getRegisteredChannelTypes,
   channelManager,
 } from "../channels/index.js";
+import { getWeixinLoginStatus } from "../channels/weixin.js";
 import { listSkills, toggleSkill, deleteSkill, openSkillsFolder } from "./skills.js";
 import { readProxyConfig, writeProxyConfig, getProxyUrl, type ProxyConfig } from "./proxy-config.js";
 import { applyProxy } from "../proxy.js";
@@ -186,6 +187,10 @@ export function chatRouter(): Router {
       const msg = error instanceof Error ? error.message : "更新频道配置失败";
       res.status(400).json({ error: msg });
     }
+  });
+
+  router.get("/channels/weixin/login-status", (_req: Request, res: Response) => {
+    res.json(getWeixinLoginStatus());
   });
 
   // --- Skills ---

@@ -799,6 +799,7 @@
         var channelsData = null;
         var skillsData = null;
         var currentView = 'chat';
+        var weixinLoginPollTimer = null;
 
         function hideAllViews() {
             chatView.style.display = 'none';
@@ -1158,19 +1159,11 @@
                 fieldsHtml =
                     '<div class="channel-drawer-field">' +
                     '<label class="channel-drawer-field-label">Bot Token <span style="font-weight:400;color:var(--text-dim)">(首次启用后扫码自动填入)</span></label>' +
-                    '<input class="channel-drawer-input" id="ch-token-' + type + '" type="password" value="' + escapeHtml(cfg.token || '') + '" placeholder="启用后重启服务并扫码绑定" spellcheck="false">' +
+                    '<input class="channel-drawer-input" id="ch-token-' + type + '" type="password" value="' + escapeHtml(cfg.token || '') + '" placeholder="扫码后自动填入" spellcheck="false">' +
                     '</div>' +
                     '<div class="channel-drawer-field">' +
                     '<label class="channel-drawer-field-label">Account ID</label>' +
                     '<input class="channel-drawer-input" id="ch-account-' + type + '" value="' + escapeHtml(cfg.accountId || '') + '" placeholder="扫码后自动填入" spellcheck="false">' +
-                    '</div>' +
-                    '<div class="channel-drawer-field">' +
-                    '<label class="channel-drawer-field-label">Base URL</label>' +
-                    '<input class="channel-drawer-input" id="ch-baseurl-' + type + '" value="' + escapeHtml(cfg.baseUrl || 'https://ilinkai.weixin.qq.com') + '" placeholder="https://ilinkai.weixin.qq.com" spellcheck="false">' +
-                    '</div>' +
-                    '<div class="channel-drawer-field">' +
-                    '<label class="channel-drawer-field-label">Bot Agent</label>' +
-                    '<input class="channel-drawer-input" id="ch-agent-' + type + '" value="' + escapeHtml(cfg.botAgent || 'AnyBot/0.1.0') + '" placeholder="AnyBot/0.1.0" spellcheck="false">' +
                     '</div>';
             } else {
                 fieldsHtml =
@@ -1215,6 +1208,20 @@
             document.getElementById('drawer-close-btn').addEventListener('click', closeChannelDrawer);
             document.getElementById('ch-toggle-' + type).addEventListener('click', function () {
                 this.classList.toggle('on');
+                if (type === 'weixin' && this.classList.contains('on')) {
+                    var tokenInput = document.getElementById('ch-token-' + type);
+                    var accountInput = document.getElementById('ch-account-' + type);
+                    var hasToken = tokenInput && tokenInput.value.trim();
+                    var hasAccount = accountInput && accountInput.value.trim();
+                    if (!hasToken || !hasAccount) {
+                        openWeixinLoginModal({
+                            state: 'pending',
+                            message: '正在生成微信登录二维码…'
+                        });
+                        startWeixinLoginPolling(true);
+                        saveChannel(type);
+                    }
+                }
             });
             document.getElementById('ch-save-' + type).addEventListener('click', function () {
                 saveChannel(type);
@@ -1249,13 +1256,12 @@
             } else if (type === 'weixin') {
                 var wxTokenInput = document.getElementById('ch-token-' + type);
                 var accountInput = document.getElementById('ch-account-' + type);
-                var baseUrlInput = document.getElementById('ch-baseurl-' + type);
-                var agentInput = document.getElementById('ch-agent-' + type);
+                var currentWeixinCfg = (channelsData && channelsData.config && channelsData.config.weixin) || {};
                 payload.token = wxTokenInput.value.trim();
                 payload.accountId = accountInput.value.trim();
-                payload.baseUrl = baseUrlInput.value.trim() || 'https://ilinkai.weixin.qq.com';
-                payload.botAgent = agentInput.value.trim() || 'AnyBot/0.1.0';
-                payload.botType = '3';
+                payload.baseUrl = currentWeixinCfg.baseUrl || 'https://ilinkai.weixin.qq.com';
+                payload.botAgent = currentWeixinCfg.botAgent || 'AnyBot/0.1.0';
+                payload.botType = currentWeixinCfg.botType || '3';
             } else {
                 var appIdInput = document.getElementById('ch-appid-' + type);
                 var appSecretInput = document.getElementById('ch-secret-' + type);
@@ -1302,11 +1308,149 @@
                     statusEl.textContent = nowOn ? '已启用' : '未启用';
                     statusEl.className = 'channel-item-status' + (nowOn ? ' on' : '');
                 }
+
             } catch (e) {
                 showError('保存频道配置失败');
             } finally {
                 saveBtn.disabled = false;
                 saveBtn.textContent = '保存';
+            }
+        }
+
+        function isWeixinBound() {
+            var cfg = (channelsData && channelsData.config && channelsData.config.weixin) || {};
+            return !!(cfg.token && cfg.accountId);
+        }
+
+        function syncWeixinDrawerFields() {
+            var cfg = (channelsData && channelsData.config && channelsData.config.weixin) || {};
+            var tokenInput = document.getElementById('ch-token-weixin');
+            var accountInput = document.getElementById('ch-account-weixin');
+            var ownerInput = document.getElementById('ch-owner-weixin');
+            var toggle = document.getElementById('ch-toggle-weixin');
+
+            if (tokenInput) tokenInput.value = cfg.token || '';
+            if (accountInput) accountInput.value = cfg.accountId || '';
+            if (ownerInput) ownerInput.value = cfg.ownerChatId || '';
+            if (toggle) toggle.classList.toggle('on', !!cfg.enabled);
+
+            var statusEl = document.querySelector('.channel-item[data-type="weixin"] .channel-item-status');
+            if (statusEl) {
+                statusEl.textContent = cfg.enabled ? '已启用' : '未启用';
+                statusEl.className = 'channel-item-status' + (cfg.enabled ? ' on' : '');
+            }
+        }
+
+        function openWeixinLoginModal(status) {
+            var existing = document.getElementById('weixin-login-overlay');
+            if (existing) {
+                updateWeixinLoginModal(status || {});
+                return;
+            }
+
+            var overlay = document.createElement('div');
+            overlay.className = 'weixin-login-overlay open';
+            overlay.id = 'weixin-login-overlay';
+            overlay.innerHTML =
+                '<div class="weixin-login-modal">' +
+                '<button class="weixin-login-close" id="weixin-login-close" aria-label="关闭">' +
+                '<svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' +
+                '</button>' +
+                '<div class="weixin-login-icon">微</div>' +
+                '<div class="weixin-login-title">微信扫码绑定</div>' +
+                '<div class="weixin-login-subtitle" id="weixin-login-message">正在生成微信登录二维码…</div>' +
+                '<div class="weixin-login-qr-frame">' +
+                '<img class="weixin-login-qr" id="weixin-login-qr" alt="微信登录二维码">' +
+                '<div class="weixin-login-placeholder" id="weixin-login-placeholder">等待二维码</div>' +
+                '</div>' +
+                '<a class="weixin-login-link" id="weixin-login-link" href="#" target="_blank" rel="noreferrer">打开二维码链接</a>' +
+                '</div>';
+            document.body.appendChild(overlay);
+            document.getElementById('weixin-login-close').addEventListener('click', closeWeixinLoginModal);
+            overlay.addEventListener('click', function (e) {
+                if (e.target === overlay) closeWeixinLoginModal();
+            });
+            updateWeixinLoginModal(status || {});
+        }
+
+        function closeWeixinLoginModal() {
+            if (weixinLoginPollTimer) {
+                clearInterval(weixinLoginPollTimer);
+                weixinLoginPollTimer = null;
+            }
+            var overlay = document.getElementById('weixin-login-overlay');
+            if (!overlay) return;
+            overlay.classList.remove('open');
+            setTimeout(function () { overlay.remove(); }, 180);
+        }
+
+        function updateWeixinLoginModal(status) {
+            var overlay = document.getElementById('weixin-login-overlay');
+            if (!overlay) return;
+            var messageEl = document.getElementById('weixin-login-message');
+            var imgEl = document.getElementById('weixin-login-qr');
+            var placeholderEl = document.getElementById('weixin-login-placeholder');
+            var linkEl = document.getElementById('weixin-login-link');
+            var message = status.message || '正在生成微信登录二维码…';
+            if (status.state === 'confirmed') message = '微信绑定成功';
+            if (status.state === 'failed') message = status.message || '微信绑定失败';
+            messageEl.textContent = message;
+
+            if (status.qrcodeDataUrl) {
+                imgEl.src = status.qrcodeDataUrl;
+                imgEl.style.display = 'block';
+                placeholderEl.style.display = 'none';
+            } else {
+                imgEl.style.display = 'none';
+                placeholderEl.style.display = 'flex';
+            }
+
+            if (status.qrcodeUrl) {
+                linkEl.href = status.qrcodeUrl;
+                linkEl.style.display = 'inline-flex';
+            } else {
+                linkEl.style.display = 'none';
+            }
+        }
+
+        function startWeixinLoginPolling(showModal) {
+            if (weixinLoginPollTimer) clearInterval(weixinLoginPollTimer);
+            pollWeixinLoginStatus(showModal);
+            weixinLoginPollTimer = setInterval(function () {
+                pollWeixinLoginStatus(showModal);
+            }, 1500);
+        }
+
+        async function pollWeixinLoginStatus(showModal) {
+            try {
+                await fetchChannels();
+                if (isWeixinBound()) {
+                    syncWeixinDrawerFields();
+                    closeWeixinLoginModal();
+                    return;
+                }
+
+                var res = await fetch('/api/channels/weixin/login-status');
+                if (!res.ok) return;
+                var status = await res.json();
+                var shouldShow = showModal || ['pending', 'scanned', 'waiting_code'].indexOf(status.state) >= 0;
+                if (!shouldShow || status.state === 'idle') return;
+                openWeixinLoginModal(status);
+                if (status.state === 'confirmed') {
+                    if (weixinLoginPollTimer) {
+                        clearInterval(weixinLoginPollTimer);
+                        weixinLoginPollTimer = null;
+                    }
+                    await fetchChannels();
+                    syncWeixinDrawerFields();
+                    closeWeixinLoginModal();
+                }
+                if (status.state === 'failed' && weixinLoginPollTimer) {
+                    clearInterval(weixinLoginPollTimer);
+                    weixinLoginPollTimer = null;
+                }
+            } catch (e) {
+                console.error('Failed to fetch weixin login status:', e);
             }
         }
 
