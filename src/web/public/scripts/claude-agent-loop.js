@@ -485,7 +485,7 @@
     }
 
     function canStream(providerData) {
-        return !!providerData && providerData.current === 'claude-code';
+        return !!providerData && (providerData.current === 'claude-code' || providerData.current === 'codex');
     }
 
     window.ClaudeAgentLoop = {

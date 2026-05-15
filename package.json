@@ -15,6 +15,7 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.139",
     "@larksuiteoapi/node-sdk": "^1.59.0",
+    "@openai/codex-sdk": "^0.130.0",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",

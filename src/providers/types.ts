@@ -1,4 +1,5 @@
 import type { SandboxMode } from "../types.js";
+import type { ClaudeAgentStreamEvent } from "./claude-code-agent-events.js";
 
 export interface ProviderModel {
   id: string;
@@ -43,4 +44,9 @@ export interface IProvider {
 
   listModels(): ProviderModel[];
   run(opts: RunOptions): Promise<RunResult>;
+  runWithEvents?(
+    opts: RunOptions & {
+      onEvent: (event: ClaudeAgentStreamEvent) => void | Promise<void>;
+    },
+  ): Promise<RunResult>;
 }

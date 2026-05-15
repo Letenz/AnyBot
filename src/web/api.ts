@@ -33,8 +33,8 @@ import {
   getWorkdir,
   getSandbox,
 } from "../shared.js";
-import type { ClaudeCodeProvider } from "../providers/claude-code.js";
 import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
+import type { IProvider } from "../providers/index.js";
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
@@ -48,15 +48,17 @@ function writeSse(res: Response, event: string, data: unknown): void {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-function isClaudeStreamingProvider(provider: ReturnType<typeof getProvider>): provider is ClaudeCodeProvider {
-  return provider.type === "claude-code" && typeof (provider as ClaudeCodeProvider).runWithEvents === "function";
+function isStreamingProvider(
+  provider: ReturnType<typeof getProvider>,
+): provider is IProvider & Required<Pick<IProvider, "runWithEvents">> {
+  return typeof provider.runWithEvents === "function";
 }
 
-function buildClaudeAgentMetadata(events: ClaudeAgentStreamEvent[]): string {
+function buildAgentLoopMetadata(provider: string, events: ClaudeAgentStreamEvent[]): string {
   return JSON.stringify({
     claudeAgentLoop: {
       version: 1,
-      provider: "claude-code",
+      provider,
       events,
     },
   });
@@ -433,8 +435,8 @@ export function chatRouter(): Router {
     }
 
     const provider = getProvider();
-    if (session.source !== "web" || !isClaudeStreamingProvider(provider)) {
-      res.status(409).json({ error: "当前会话或 Provider 不支持 Claude Code Agent 流式展示" });
+    if (session.source !== "web" || !isStreamingProvider(provider)) {
+      res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
       return;
     }
 
@@ -522,7 +524,7 @@ export function chatRouter(): Router {
       });
 
       const providerSessionId = result.sessionId || session.sessionId;
-      db.addMessage(id, "assistant", result.text, buildClaudeAgentMetadata(agentEvents));
+      db.addMessage(id, "assistant", result.text, buildAgentLoopMetadata(provider.type, agentEvents));
       db.updateSession({
         id,
         title: session.title,
