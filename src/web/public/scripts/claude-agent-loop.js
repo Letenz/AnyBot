@@ -49,7 +49,7 @@
     function createMessage(opts) {
         var messagesEl = opts.messagesEl;
         var scrollBottom = opts.scrollBottom || function () {};
-        var startedAt = Date.now();
+        var startedAt = opts.startedAt || Date.now();
         var isPersisted = !!opts.persisted;
 
         var state = {
@@ -64,7 +64,7 @@
             editCount: 0,
             webCount: 0,
             status: 'running',
-            durationMs: 0,
+            durationMs: Math.max(0, Date.now() - startedAt),
         };
 
         var row = document.createElement('div');
@@ -87,7 +87,7 @@
         var processSummary = document.createElement('summary');
         processSummary.className = 'claude-process-summary';
         processSummary.innerHTML =
-            '<span class="claude-process-title" data-role="title">处理中 0s</span>' +
+            '<span class="claude-process-title" data-role="title">处理中 ' + formatDuration(state.durationMs) + '</span>' +
             '<span class="claude-process-chevron">›</span>';
 
         var processBody = document.createElement('div');
@@ -356,6 +356,10 @@
         function handleEvent(event) {
             if (!event || !event.type) return;
             if (event.type === 'agent_status') {
+                if (event.durationMs || event.durationMs === 0) {
+                    state.durationMs = event.durationMs;
+                    updateProcessTitle();
+                }
                 if (event.status === 'started') {
                     state.status = 'running';
                     updateProcessTitle();
@@ -455,12 +459,9 @@
         return view;
     }
 
-    async function stream(opts) {
-        var res = await fetch('/api/sessions/' + opts.sessionId + '/messages/stream', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(opts.body),
-        });
+    async function consumeStreamResponse(res, opts) {
+        var inactive = opts.allowInactive && res.status === 404;
+        if (inactive) return { fallback: false, inactive: true };
 
         if (res.status === 409) return { fallback: true };
         if (!res.ok) {
@@ -481,7 +482,26 @@
             });
         }
 
-        return { fallback: false };
+        return { fallback: false, inactive: false };
+    }
+
+    async function stream(opts) {
+        var res = await fetch('/api/sessions/' + opts.sessionId + '/messages/stream', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(opts.body),
+            signal: opts.signal,
+        });
+        return consumeStreamResponse(res, opts);
+    }
+
+    async function resume(opts) {
+        opts.allowInactive = true;
+        var res = await fetch('/api/sessions/' + opts.sessionId + '/messages/stream', {
+            method: 'GET',
+            signal: opts.signal,
+        });
+        return consumeStreamResponse(res, opts);
     }
 
     function canStream(providerData) {
@@ -492,6 +512,7 @@
         canStream: canStream,
         createMessage: createMessage,
         renderPersistedMessage: renderPersistedMessage,
+        resume: resume,
         stream: stream,
     };
 })();

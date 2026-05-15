@@ -64,6 +64,62 @@ function buildAgentLoopMetadata(provider: string, events: ClaudeAgentStreamEvent
   });
 }
 
+type AgentStreamEvent =
+  | ClaudeAgentStreamEvent
+  | { type: "result"; content: string; title: string; sessionId: string | null }
+  | { type: "error"; error: string }
+  | { type: "done" };
+
+type ActiveAgentStream = {
+  events: AgentStreamEvent[];
+  clients: Set<Response>;
+  startedAt: number;
+  done: boolean;
+};
+
+const activeAgentStreams = new Map<string, ActiveAgentStream>();
+
+function emitAgentStream(active: ActiveAgentStream, event: AgentStreamEvent): void {
+  active.events.push(event);
+  for (const client of active.clients) {
+    if (client.writableEnded) continue;
+    writeSse(client, event.type, event);
+  }
+}
+
+function attachAgentStreamClient(res: Response, active: ActiveAgentStream): void {
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  active.clients.add(res);
+  res.on("close", () => {
+    active.clients.delete(res);
+  });
+
+  for (const event of active.events) {
+    if (res.writableEnded) break;
+    writeSse(res, event.type, event);
+  }
+
+  if (active.done && !res.writableEnded) {
+    res.end();
+  }
+}
+
+function finishAgentStream(sessionId: string, active: ActiveAgentStream): void {
+  if (!active.done) {
+    active.done = true;
+    emitAgentStream(active, { type: "done" });
+  }
+  for (const client of active.clients) {
+    if (!client.writableEnded) client.end();
+  }
+  active.clients.clear();
+  activeAgentStreams.delete(sessionId);
+}
+
 // 上传目录：使用配置的工作目录
 const UPLOAD_DIR = path.join(getWorkdir(), "tmp", "uploads");
 try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (_) {}
@@ -118,6 +174,9 @@ export function chatRouter(): Router {
       id: session.id,
       title: session.title,
       messages: session.messages,
+      activeStream: activeAgentStreams.has(session.id)
+        ? { startedAt: activeAgentStreams.get(session.id)?.startedAt }
+        : null,
     });
   });
 
@@ -426,11 +485,33 @@ export function chatRouter(): Router {
 
   // --- Chat messages ---
 
+  router.get("/sessions/:id/messages/stream", (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const session = db.getSession(id);
+    if (!session) {
+      res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+
+    const active = activeAgentStreams.get(id);
+    if (!active) {
+      res.status(404).json({ error: "当前会话没有正在进行的流式响应" });
+      return;
+    }
+
+    attachAgentStreamClient(res, active);
+  });
+
   router.post("/sessions/:id/messages/stream", async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const session = db.getSession(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+
+    if (activeAgentStreams.has(id)) {
+      res.status(423).json({ error: "当前会话正在处理中，请稍后再发送新消息" });
       return;
     }
 
@@ -479,87 +560,91 @@ export function chatRouter(): Router {
     if (session.messages.length <= 1) {
       session.title = generateTitle(content?.trim() || "文件分析");
     }
+    db.updateSession({
+      id,
+      title: session.title,
+      sessionId: session.sessionId,
+      updatedAt: Date.now(),
+    });
 
     const prompt = session.sessionId
       ? buildResumePrompt(userText)
       : buildFirstTurnPrompt(userText);
 
-    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders?.();
-
-    let closed = false;
-    res.on("close", () => {
-      closed = true;
-    });
+    const active: ActiveAgentStream = {
+      events: [],
+      clients: new Set(),
+      startedAt: Date.now(),
+      done: false,
+    };
+    activeAgentStreams.set(id, active);
+    attachAgentStreamClient(res, active);
 
     const agentEvents: ClaudeAgentStreamEvent[] = [];
-    const emit = (event: ClaudeAgentStreamEvent | { type: "result"; content: string; title: string; sessionId: string | null } | { type: "error"; error: string }) => {
-      if (event.type !== "result" && event.type !== "error") {
+    const emit = (event: AgentStreamEvent) => {
+      if (event.type !== "result" && event.type !== "error" && event.type !== "done") {
         agentEvents.push(event);
       }
-      if (!closed) writeSse(res, event.type, event);
+      emitAgentStream(active, event);
     };
 
-    try {
-      logger.info("web.chat.stream.start", {
-        sessionId: session.id,
-        providerSessionId: session.sessionId,
-        provider: provider.type,
-        userTextChars: userText.length,
-        imageCount: imagePaths.length,
-        fileCount: filePaths.length,
-      });
+    void (async () => {
+      try {
+        logger.info("web.chat.stream.start", {
+          sessionId: session.id,
+          providerSessionId: session.sessionId,
+          provider: provider.type,
+          userTextChars: userText.length,
+          imageCount: imagePaths.length,
+          fileCount: filePaths.length,
+        });
 
-      const result = await provider.runWithEvents({
-        workdir: getWorkdir(),
-        sandbox: getSandbox(),
-        model: getCurrentModel(),
-        prompt,
-        imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
-        sessionId: session.sessionId || undefined,
-        newSessionId: session.sessionId ? undefined : randomUUID(),
-        onEvent: emit,
-      });
+        const result = await provider.runWithEvents({
+          workdir: getWorkdir(),
+          sandbox: getSandbox(),
+          model: getCurrentModel(),
+          prompt,
+          imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
+          sessionId: session.sessionId || undefined,
+          newSessionId: session.sessionId ? undefined : randomUUID(),
+          onEvent: emit,
+        });
 
-      const providerSessionId = result.sessionId || session.sessionId;
-      db.addMessage(id, "assistant", result.text, buildAgentLoopMetadata(provider.type, agentEvents));
-      db.updateSession({
-        id,
-        title: session.title,
-        sessionId: providerSessionId,
-        updatedAt: Date.now(),
-      });
+        const providerSessionId = result.sessionId || session.sessionId;
+        db.addMessage(id, "assistant", result.text, buildAgentLoopMetadata(provider.type, agentEvents));
+        db.updateSession({
+          id,
+          title: session.title,
+          sessionId: providerSessionId,
+          updatedAt: Date.now(),
+        });
 
-      emit({
-        type: "result",
-        content: result.text,
-        title: session.title,
-        sessionId: providerSessionId,
-      });
+        emit({
+          type: "result",
+          content: result.text,
+          title: session.title,
+          sessionId: providerSessionId,
+        });
 
-      logger.info("web.chat.stream.success", {
-        sessionId: session.id,
-        providerSessionId,
-        provider: provider.type,
-        replyChars: result.text.length,
-      });
-    } catch (error) {
-      logger.error("web.chat.stream.failed", {
-        sessionId: session.id,
-        error,
-      });
-      emit({
-        type: "error",
-        error: error instanceof Error ? error.message : "处理消息时出错了，请稍后再试。",
-      });
-    } finally {
-      if (!closed) {
-        writeSse(res, "done", { type: "done" });
-        res.end();
+        logger.info("web.chat.stream.success", {
+          sessionId: session.id,
+          providerSessionId,
+          provider: provider.type,
+          replyChars: result.text.length,
+        });
+      } catch (error) {
+        logger.error("web.chat.stream.failed", {
+          sessionId: session.id,
+          error,
+        });
+        emit({
+          type: "error",
+          error: error instanceof Error ? error.message : "处理消息时出错了，请稍后再试。",
+        });
+      } finally {
+        finishAgentStream(id, active);
       }
-    }
+    })();
   });
 
   router.post("/sessions/:id/messages", async (req: Request, res: Response) => {
@@ -567,6 +652,11 @@ export function chatRouter(): Router {
     const session = db.getSession(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+
+    if (activeAgentStreams.has(id)) {
+      res.status(423).json({ error: "当前会话正在处理中，请稍后再发送新消息" });
       return;
     }
 

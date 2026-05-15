@@ -57,6 +57,8 @@
         let sessions = [];
         let modelConfig = null;
         let providerData = null;
+        let activeStreamSessionId = null;
+        let activeStreamAbortController = null;
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -530,8 +532,72 @@
             }
         }
 
+        function stopActiveStreamSubscription() {
+            if (activeStreamAbortController) {
+                activeStreamAbortController.abort();
+                activeStreamAbortController = null;
+            }
+            activeStreamSessionId = null;
+            isTyping = false;
+            updateSendBtnState();
+        }
+
+        async function resumeActiveStream(sessionId, activeStream) {
+            if (!window.ClaudeAgentLoop || !window.ClaudeAgentLoop.resume) return;
+
+            var controller = new AbortController();
+            activeStreamAbortController = controller;
+            activeStreamSessionId = sessionId;
+            isTyping = true;
+            updateSendBtnState();
+
+            var agentView = window.ClaudeAgentLoop.createMessage({
+                messagesEl: messagesEl,
+                scrollBottom: scrollBottom,
+                startedAt: activeStream && activeStream.startedAt,
+            });
+
+            try {
+                var result = await window.ClaudeAgentLoop.resume({
+                    sessionId: sessionId,
+                    view: agentView,
+                    signal: controller.signal,
+                });
+
+                if (activeStreamSessionId !== sessionId) return;
+
+                if (result && result.inactive) {
+                    if (agentView.row) agentView.row.remove();
+                    stopActiveStreamSubscription();
+                    isTyping = false;
+                    updateSendBtnState();
+                    await loadSession(sessionId);
+                    return;
+                }
+
+                await fetchSessions();
+            } catch (e) {
+                if (e.name === 'AbortError') return;
+                if (agentView) {
+                    agentView.handleEvent({
+                        type: 'error',
+                        error: e.message || '网络错误，请检查连接',
+                    });
+                }
+                showError(e.message || '网络错误，请检查连接');
+            } finally {
+                if (activeStreamSessionId === sessionId) {
+                    activeStreamAbortController = null;
+                    activeStreamSessionId = null;
+                    isTyping = false;
+                    updateSendBtnState();
+                }
+            }
+        }
+
         async function loadSession(id) {
             try {
+                stopActiveStreamSubscription();
                 var res = await fetch('/api/sessions/' + id);
                 if (!res.ok) {
                     showError('加载会话失败');
@@ -564,6 +630,10 @@
                         }
                         appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo);
                     });
+                }
+
+                if (data.activeStream) {
+                    resumeActiveStream(id, data.activeStream);
                 }
 
                 renderHistory();
