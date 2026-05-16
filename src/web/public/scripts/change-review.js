@@ -60,7 +60,7 @@
             (review.error ? '<div class="change-review-error">' + escapeHtml(review.error) + '</div>' : '') +
             '<div class="change-review-actions">' +
             '<button class="change-review-btn secondary" data-action="revert"' + disabled + '>撤销</button>' +
-            '<button class="change-review-btn primary" data-action="approve"' + disabled + '>审核 / 通过</button>' +
+            '<button class="change-review-btn primary" data-action="approve"' + disabled + '>通过</button>' +
             '</div>';
     }
 
