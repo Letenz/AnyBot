@@ -48,6 +48,11 @@ import type { IProvider } from "../providers/index.js";
 import type { ProviderContextUsage } from "../providers/types.js";
 
 const execFile = promisify(execFileCallback);
+const DEFAULT_SESSION_MESSAGE_LIMIT = 40;
+const MESSAGE_PREVIEW_CHARS = 20000;
+const MAX_PERSISTED_AGENT_EVENTS = 240;
+const MAX_PERSISTED_EVENT_TEXT = 2000;
+const MAX_PERSISTED_DIFF_TEXT = 4000;
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
@@ -67,6 +72,53 @@ function isStreamingProvider(
   return typeof provider.runWithEvents === "function";
 }
 
+function truncateForHistory(value: string | undefined, max = MAX_PERSISTED_EVENT_TEXT): string | undefined {
+  if (!value) return value;
+  if (value.length <= max) return value;
+  return `${value.slice(0, max)}\n...[已截断 ${value.length - max} 字符]`;
+}
+
+function compactAgentEvent(event: ClaudeAgentStreamEvent): ClaudeAgentStreamEvent | null {
+  if (event.type === "answer_delta" || event.type === "tool_progress") return null;
+  if (event.type === "tool_start") {
+    return {
+      ...event,
+      tool: {
+        ...event.tool,
+        input: truncateForHistory(event.tool.input),
+      },
+    };
+  }
+  if (event.type === "tool_end") {
+    return {
+      ...event,
+      output: event.output
+        ? {
+            stdout: truncateForHistory(event.output.stdout),
+            stderr: truncateForHistory(event.output.stderr),
+            text: truncateForHistory(event.output.text),
+          }
+        : undefined,
+      error: truncateForHistory(event.error),
+      diffs: event.diffs?.map((diff) => ({
+        ...diff,
+        diff: truncateForHistory(diff.diff, MAX_PERSISTED_DIFF_TEXT) || "",
+      })),
+    };
+  }
+  if (event.type === "file_change") {
+    return { ...event, diff: undefined };
+  }
+  return event;
+}
+
+function compactAgentEvents(events: ClaudeAgentStreamEvent[]): ClaudeAgentStreamEvent[] {
+  return events
+    .map(compactAgentEvent)
+    .filter((event): event is ClaudeAgentStreamEvent => !!event)
+    .slice(-MAX_PERSISTED_AGENT_EVENTS);
+}
+
 function buildAssistantMetadata(opts: {
   provider?: string;
   events?: ClaudeAgentStreamEvent[];
@@ -77,13 +129,65 @@ function buildAssistantMetadata(opts: {
     metadata.claudeAgentLoop = {
       version: 1,
       provider: opts.provider,
-      events: opts.events,
+      events: compactAgentEvents(opts.events),
     };
   }
   if (opts.changeReview) {
     metadata.changeReview = opts.changeReview;
   }
   return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
+}
+
+function readMessagePageQuery(req: Request): { beforeId: number | null; limit: number } {
+  const beforeRaw = Array.isArray(req.query.before) ? req.query.before[0] : req.query.before;
+  const limitRaw = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+  const before = beforeRaw ? Number(beforeRaw) : null;
+  const limit = limitRaw ? Number(limitRaw) : DEFAULT_SESSION_MESSAGE_LIMIT;
+  return {
+    beforeId: before && Number.isFinite(before) && before > 0 ? Math.floor(before) : null,
+    limit: Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_SESSION_MESSAGE_LIMIT,
+  };
+}
+
+type ClientChatMessage = db.ChatMessage & {
+  contentTruncated?: boolean;
+  contentChars?: number;
+};
+
+async function prepareMessagesForClient(
+  messages: db.ChatMessage[],
+): Promise<ClientChatMessage[]> {
+  const hydrated = await hydrateChangeReviewMetadata(messages);
+  return hydrated.map((message) => {
+    let metadata = message.metadata;
+    if (metadata) {
+      try {
+        const parsed = JSON.parse(metadata) as Record<string, unknown>;
+        const loop = parsed.claudeAgentLoop as { events?: ClaudeAgentStreamEvent[] } | undefined;
+        if (loop && Array.isArray(loop.events)) {
+          parsed.claudeAgentLoop = {
+            ...loop,
+            events: compactAgentEvents(loop.events),
+          };
+          metadata = JSON.stringify(parsed);
+        }
+      } catch {
+        metadata = message.metadata;
+      }
+    }
+
+    if (message.content.length <= MESSAGE_PREVIEW_CHARS) {
+      return { ...message, metadata };
+    }
+
+    return {
+      ...message,
+      metadata,
+      content: `${message.content.slice(0, MESSAGE_PREVIEW_CHARS)}\n\n...[内容较长，已折叠]`,
+      contentTruncated: true,
+      contentChars: message.content.length,
+    };
+  });
 }
 
 async function hydrateChangeReviewMetadata(
@@ -284,7 +388,7 @@ function readProjectTree(project: db.Project, relativePath: string): Array<{
     });
 }
 
-function getSessionWorkdir(session: db.ChatSession): string {
+function getSessionWorkdir(session: Pick<db.ChatSession, "projectId">): string {
   if (!session.projectId) return getWorkdir();
   const project = db.getProject(session.projectId);
   if (!project) {
@@ -392,20 +496,56 @@ export function chatRouter(): Router {
 
   router.get("/sessions/:id", async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
     }
+    const page = db.getMessagesPage(id, readMessagePageQuery(req));
     res.json({
       id: session.id,
       title: session.title,
       projectId: session.projectId,
-      messages: await hydrateChangeReviewMetadata(session.messages),
+      messages: await prepareMessagesForClient(page.messages),
+      hasMoreMessages: page.hasMore,
       activeStream: activeAgentStreams.has(session.id)
         ? { startedAt: activeAgentStreams.get(session.id)?.startedAt }
         : null,
     });
+  });
+
+  router.get("/sessions/:id/messages", async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const session = db.getSessionMetadata(id);
+    if (!session) {
+      res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+    const page = db.getMessagesPage(id, readMessagePageQuery(req));
+    res.json({
+      messages: await prepareMessagesForClient(page.messages),
+      hasMoreMessages: page.hasMore,
+    });
+  });
+
+  router.get("/sessions/:id/messages/:messageId/content", (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const messageId = Number(req.params.messageId);
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      res.status(400).json({ error: "消息 ID 无效" });
+      return;
+    }
+    const session = db.getSessionMetadata(id);
+    if (!session) {
+      res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+    const content = db.getMessageContent(id, Math.floor(messageId));
+    if (content == null) {
+      res.status(404).json({ error: "消息不存在" });
+      return;
+    }
+    res.json({ content });
   });
 
   router.delete("/sessions/:id", (req: Request, res: Response) => {
@@ -741,7 +881,7 @@ export function chatRouter(): Router {
 
   router.get("/sessions/:id/messages/stream", (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
@@ -758,7 +898,7 @@ export function chatRouter(): Router {
 
   router.post("/sessions/:id/messages/stream", async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
@@ -819,7 +959,7 @@ export function chatRouter(): Router {
 
     db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
 
-    if (session.messages.length <= 1) {
+    if (db.countMessages(id) <= 1) {
       session.title = generateTitle(content?.trim() || "文件分析");
     }
     db.updateSession({
@@ -936,7 +1076,7 @@ export function chatRouter(): Router {
 
   router.post("/sessions/:id/messages", async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
@@ -995,7 +1135,7 @@ export function chatRouter(): Router {
 
     db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
 
-    if (session.messages.length <= 1) {
+    if (db.countMessages(id) <= 1) {
       session.title = generateTitle(content?.trim() || "文件分析");
     }
 

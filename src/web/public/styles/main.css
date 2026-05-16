@@ -1064,6 +1064,43 @@
             border-radius: 99px;
         }
 
+        .load-older-messages {
+            align-self: center;
+            margin: 0 0 12px;
+            padding: 7px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--input-bg);
+            color: var(--text-muted);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .load-older-messages:hover:not(:disabled) {
+            color: var(--text);
+            border-color: var(--border-hover);
+        }
+
+        .load-older-messages:disabled {
+            opacity: 0.55;
+            cursor: default;
+        }
+
+        .large-message-expand {
+            margin-top: 10px;
+            padding: 7px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--input-bg);
+            color: var(--text);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .large-message-expand:hover {
+            border-color: var(--border-hover);
+        }
+
         #empty-state {
             flex: 1;
             display: flex;

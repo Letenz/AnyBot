@@ -14,6 +14,8 @@ export type ChatSession = {
   updatedAt: number;
 };
 
+export type ChatMessage = ChatSession["messages"][number];
+
 export type SessionSummary = {
   id: string;
   title: string;
@@ -135,6 +137,30 @@ const stmts = {
     WHERE session_id = ? ORDER BY id ASC
   `),
 
+  getMessagesPage: db.prepare(`
+    SELECT id, role, content, metadata FROM (
+      SELECT id, role, content, metadata FROM messages
+      WHERE session_id = ?
+        AND (? IS NULL OR id < ?)
+      ORDER BY id DESC
+      LIMIT ?
+    ) ORDER BY id ASC
+  `),
+
+  getMessageContent: db.prepare(`
+    SELECT content FROM messages WHERE session_id = ? AND id = ?
+  `),
+
+  countMessagesBefore: db.prepare(`
+    SELECT COUNT(*) AS count FROM messages
+    WHERE session_id = ?
+      AND (? IS NULL OR id < ?)
+  `),
+
+  countMessages: db.prepare(`
+    SELECT COUNT(*) AS count FROM messages WHERE session_id = ?
+  `),
+
   insertSession: db.prepare(`
     INSERT INTO sessions (id, title, session_id, source, chat_id, project_id, created_at, updated_at)
     VALUES (@id, @title, @sessionId, @source, @chatId, @projectId, @createdAt, @updatedAt)
@@ -220,6 +246,47 @@ export function getSession(id: string): ChatSession | null {
   }>;
 
   return { ...row, messages };
+}
+
+export function getSessionMetadata(id: string): Omit<ChatSession, "messages"> | null {
+  const row = stmts.getSession.get(id) as
+    | {
+        id: string;
+        title: string;
+        sessionId: string | null;
+        source: string;
+        chatId: string | null;
+        projectId: string | null;
+        createdAt: number;
+        updatedAt: number;
+      }
+    | undefined;
+  return row || null;
+}
+
+export function getMessagesPage(
+  sessionId: string,
+  opts: { beforeId?: number | null; limit?: number } = {},
+): { messages: ChatMessage[]; hasMore: boolean } {
+  const limit = Math.max(1, Math.min(100, Math.floor(opts.limit || 40)));
+  const beforeId = opts.beforeId || null;
+  const messages = stmts.getMessagesPage.all(sessionId, beforeId, beforeId, limit) as ChatMessage[];
+  const oldestId = messages[0]?.id ?? beforeId;
+  const countRow = stmts.countMessagesBefore.get(sessionId, oldestId, oldestId) as { count: number };
+  return {
+    messages,
+    hasMore: Number(countRow?.count || 0) > 0,
+  };
+}
+
+export function getMessageContent(sessionId: string, messageId: number): string | null {
+  const row = stmts.getMessageContent.get(sessionId, messageId) as { content: string } | undefined;
+  return row?.content ?? null;
+}
+
+export function countMessages(sessionId: string): number {
+  const row = stmts.countMessages.get(sessionId) as { count: number };
+  return Number(row?.count || 0);
 }
 
 export function createSession(session: ChatSession): void {

@@ -74,9 +74,13 @@
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
         let isBatchRenderingMessages = false;
+        let currentSessionHasMoreMessages = false;
+        let isLoadingOlderMessages = false;
         let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
         let expandedProjectIds = readStoredSet('expandedProjectIds');
+        const SESSION_MESSAGE_PAGE_SIZE = 40;
+        const LARGE_MESSAGE_PREVIEW_CHARS = 20000;
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -324,6 +328,57 @@
             if (empty) empty.remove();
         }
 
+        async function fetchFullMessageContent(messageId) {
+            if (!currentSessionId || !messageId) throw new Error('无法加载完整内容');
+            var res = await fetch('/api/sessions/' + currentSessionId + '/messages/' + encodeURIComponent(messageId) + '/content');
+            if (!res.ok) throw new Error('加载完整内容失败');
+            var data = await res.json();
+            return data.content || '';
+        }
+
+        function renderAssistantText(content, text, opts) {
+            opts = opts || {};
+            var fullText = String(text || '');
+            var renderText = fullText;
+            var isLarge = opts.contentTruncated || fullText.length > LARGE_MESSAGE_PREVIEW_CHARS;
+            if (isLarge) {
+                renderText = opts.contentTruncated
+                    ? fullText
+                    : fullText.slice(0, LARGE_MESSAGE_PREVIEW_CHARS) + '\n\n...[内容较长，已折叠]';
+            }
+            try {
+                content.innerHTML = marked.parse(renderText);
+            } catch (e) {
+                content.textContent = renderText;
+            }
+            if (!isLarge) return;
+            var expand = document.createElement('button');
+            expand.className = 'large-message-expand';
+            expand.type = 'button';
+            expand.textContent = opts.contentChars ? ('展开完整内容（' + formatTokenCount(opts.contentChars) + ' 字符）') : '展开完整内容';
+            expand.addEventListener('click', async function () {
+                expand.disabled = true;
+                expand.textContent = '加载中...';
+                var nextText = fullText;
+                if (opts.contentTruncated && opts.messageId) {
+                    try {
+                        nextText = await fetchFullMessageContent(opts.messageId);
+                    } catch (e) {
+                        showError(e.message || '加载完整内容失败');
+                        expand.disabled = false;
+                        expand.textContent = '展开完整内容';
+                        return;
+                    }
+                }
+                try {
+                    content.innerHTML = marked.parse(nextText);
+                } catch (e) {
+                    content.textContent = nextText;
+                }
+            });
+            content.appendChild(expand);
+        }
+
         function showEmptyState() {
             messagesEl.innerHTML =
                 '<div id="empty-state">' +
@@ -333,7 +388,7 @@
                 '</div>';
         }
 
-        function appendMessage(role, text, attachments, changeReview) {
+        function appendMessage(role, text, attachments, changeReview, opts) {
             clearEmpty();
             var row = document.createElement('div');
             row.className = 'message-row ' + role;
@@ -348,11 +403,7 @@
 
                 var content = document.createElement('div');
                 content.className = 'message-content';
-                try {
-                    content.innerHTML = marked.parse(text);
-                } catch (e) {
-                    content.textContent = text;
-                }
+                renderAssistantText(content, text, opts);
                 if (changeReview && window.ChangeReview) {
                     var reviewCard = window.ChangeReview.render({
                         review: changeReview,
@@ -370,7 +421,28 @@
 
                 var content = document.createElement('div');
                 content.className = 'message-content';
-                content.textContent = text;
+                var userText = document.createElement('div');
+                userText.textContent = text;
+                content.appendChild(userText);
+                if (opts && opts.contentTruncated && opts.messageId) {
+                    var userExpand = document.createElement('button');
+                    userExpand.className = 'large-message-expand';
+                    userExpand.type = 'button';
+                    userExpand.textContent = opts.contentChars ? ('展开完整内容（' + formatTokenCount(opts.contentChars) + ' 字符）') : '展开完整内容';
+                    userExpand.addEventListener('click', async function () {
+                        userExpand.disabled = true;
+                        userExpand.textContent = '加载中...';
+                        try {
+                            userText.textContent = await fetchFullMessageContent(opts.messageId);
+                            userExpand.remove();
+                        } catch (e) {
+                            showError(e.message || '加载完整内容失败');
+                            userExpand.disabled = false;
+                            userExpand.textContent = '展开完整内容';
+                        }
+                    });
+                    content.appendChild(userExpand);
+                }
 
                 // 显示附件：图片渲染缩略图，其他渲染标签
                 if (attachments && attachments.length > 0) {
@@ -408,6 +480,101 @@
             messagesEl.appendChild(row);
             scrollBottom();
             return row;
+        }
+
+        function getOldestRenderedMessageId() {
+            var first = messagesEl.querySelector('.message-row[data-message-id]');
+            return first ? Number(first.dataset.messageId || 0) : null;
+        }
+
+        function removeOlderMessagesControl() {
+            var existing = document.getElementById('load-older-messages');
+            if (existing) existing.remove();
+        }
+
+        function renderOlderMessagesControl() {
+            removeOlderMessagesControl();
+            if (!currentSessionHasMoreMessages) return;
+            var btn = document.createElement('button');
+            btn.id = 'load-older-messages';
+            btn.className = 'load-older-messages';
+            btn.type = 'button';
+            btn.textContent = isLoadingOlderMessages ? '加载中...' : '加载更早消息';
+            btn.disabled = isLoadingOlderMessages;
+            btn.addEventListener('click', loadOlderMessages);
+            messagesEl.insertBefore(btn, messagesEl.firstChild);
+        }
+
+        function renderMessageRecord(m, beforeNode) {
+            var row = null;
+            var attInfo = null;
+            var meta = parseMessageMetadata(m.metadata);
+            if (meta.attachments && meta.attachments.length > 0) {
+                attInfo = meta.attachments;
+            }
+            if (m.role === 'assistant' && meta.claudeAgentLoop && window.ClaudeAgentLoop && window.ClaudeAgentLoop.renderPersistedMessage) {
+                clearEmpty();
+                var view = window.ClaudeAgentLoop.renderPersistedMessage({
+                    messagesEl: messagesEl,
+                    scrollBottom: scrollBottom,
+                    content: m.content,
+                    loop: meta.claudeAgentLoop,
+                    changeReview: meta.changeReview,
+                    contentTruncated: !!m.contentTruncated,
+                    contentChars: m.contentChars,
+                    fullContentLoader: m.contentTruncated
+                        ? function () { return fetchFullMessageContent(m.id); }
+                        : null,
+                });
+                row = view && view.row;
+                var usageEvents = Array.isArray(meta.claudeAgentLoop.events)
+                    ? meta.claudeAgentLoop.events.filter(function (event) { return event && event.type === 'context_usage' && event.usage; })
+                    : [];
+                if (usageEvents.length > 0) updateContextUsage(usageEvents[usageEvents.length - 1].usage);
+            } else {
+                row = appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview, {
+                    messageId: m.id,
+                    contentTruncated: !!m.contentTruncated,
+                    contentChars: m.contentChars,
+                });
+            }
+            if (row) {
+                row.dataset.messageId = String(m.id);
+                if (beforeNode && row !== beforeNode) messagesEl.insertBefore(row, beforeNode);
+            }
+            return row;
+        }
+
+        async function loadOlderMessages() {
+            if (!currentSessionId || isLoadingOlderMessages) return;
+            var beforeId = getOldestRenderedMessageId();
+            if (!beforeId) return;
+            var anchor = messagesEl.querySelector('.message-row[data-message-id]');
+            var previousScrollHeight = messagesEl.scrollHeight;
+            try {
+                isLoadingOlderMessages = true;
+                renderOlderMessagesControl();
+                var res = await fetch('/api/sessions/' + currentSessionId + '/messages?before=' + encodeURIComponent(beforeId) + '&limit=' + SESSION_MESSAGE_PAGE_SIZE);
+                if (!res.ok) throw new Error('加载更早消息失败');
+                var data = await res.json();
+                removeOlderMessagesControl();
+                isBatchRenderingMessages = true;
+                try {
+                    (data.messages || []).forEach(function (m) {
+                        renderMessageRecord(m, anchor);
+                    });
+                } finally {
+                    isBatchRenderingMessages = false;
+                }
+                currentSessionHasMoreMessages = !!data.hasMoreMessages;
+                renderOlderMessagesControl();
+                messagesEl.scrollTop += messagesEl.scrollHeight - previousScrollHeight;
+            } catch (e) {
+                showError(e.message || '加载更早消息失败');
+            } finally {
+                isLoadingOlderMessages = false;
+                renderOlderMessagesControl();
+            }
         }
 
         function showTyping() {
@@ -892,7 +1059,7 @@
 
             try {
                 stopActiveStreamSubscription();
-                var res = await fetch('/api/sessions/' + id);
+                var res = await fetch('/api/sessions/' + id + '?limit=' + SESSION_MESSAGE_PAGE_SIZE);
                 if (!res.ok) {
                     showError('加载会话失败');
                     return;
@@ -902,6 +1069,8 @@
                 currentSessionId = id;
                 currentSessionProjectId = data.projectId || null;
                 activeProjectId = data.projectId || null;
+                currentSessionHasMoreMessages = !!data.hasMoreMessages;
+                isLoadingOlderMessages = false;
                 updateContextUsage(null);
                 var didExpandProject = false;
                 if (activeProjectId && !expandedProjectIds.has(activeProjectId)) {
@@ -919,32 +1088,13 @@
                         showEmptyState();
                     } else {
                         data.messages.forEach(function (m) {
-                            var attInfo = null;
-                            var meta = parseMessageMetadata(m.metadata);
-                            if (meta.attachments && meta.attachments.length > 0) {
-                                attInfo = meta.attachments;
-                            }
-                            if (m.role === 'assistant' && meta.claudeAgentLoop && window.ClaudeAgentLoop && window.ClaudeAgentLoop.renderPersistedMessage) {
-                                clearEmpty();
-                                window.ClaudeAgentLoop.renderPersistedMessage({
-                                    messagesEl: messagesEl,
-                                    scrollBottom: scrollBottom,
-                                    content: m.content,
-                                    loop: meta.claudeAgentLoop,
-                                    changeReview: meta.changeReview,
-                                });
-                                var usageEvents = Array.isArray(meta.claudeAgentLoop.events)
-                                    ? meta.claudeAgentLoop.events.filter(function (event) { return event && event.type === 'context_usage' && event.usage; })
-                                    : [];
-                                if (usageEvents.length > 0) updateContextUsage(usageEvents[usageEvents.length - 1].usage);
-                                return;
-                            }
-                            appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview);
+                            renderMessageRecord(m);
                         });
                     }
                 } finally {
                     isBatchRenderingMessages = false;
                 }
+                renderOlderMessagesControl();
                 scrollBottom();
 
                 if (data.activeStream) {
