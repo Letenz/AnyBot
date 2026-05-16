@@ -8,6 +8,7 @@ export type ChatSession = {
   sessionId: string | null;
   source: string;
   chatId: string | null;
+  projectId: string | null;
   messages: Array<{ id: number; role: "user" | "assistant"; content: string; metadata?: string | null }>;
   createdAt: number;
   updatedAt: number;
@@ -17,7 +18,16 @@ export type SessionSummary = {
   id: string;
   title: string;
   source: string;
+  projectId: string | null;
   messageCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  path: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -32,12 +42,21 @@ db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS projects (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    path       TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS sessions (
     id         TEXT PRIMARY KEY,
     title      TEXT NOT NULL DEFAULT '新对话',
     session_id TEXT,
     source     TEXT NOT NULL DEFAULT 'web',
     chat_id    TEXT,
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -60,14 +79,44 @@ try {
   db.exec(`ALTER TABLE sessions ADD COLUMN chat_id TEXT`);
 } catch (_) {}
 try {
+  db.exec(`ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL`);
+} catch (_) {}
+try {
   db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`);
 } catch (_) {}
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_source_chat ON sessions(source, chat_id)`);;
+db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)`);
 
 const stmts = {
+  listProjects: db.prepare(`
+    SELECT id, name, path, created_at AS createdAt, updated_at AS updatedAt
+    FROM projects
+    ORDER BY updated_at DESC, name ASC
+  `),
+
+  getProject: db.prepare(`
+    SELECT id, name, path, created_at AS createdAt, updated_at AS updatedAt
+    FROM projects WHERE id = ?
+  `),
+
+  findProjectByPath: db.prepare(`
+    SELECT id, name, path, created_at AS createdAt, updated_at AS updatedAt
+    FROM projects WHERE path = ?
+  `),
+
+  insertProject: db.prepare(`
+    INSERT INTO projects (id, name, path, created_at, updated_at)
+    VALUES (@id, @name, @path, @createdAt, @updatedAt)
+  `),
+
+  touchProject: db.prepare(`
+    UPDATE projects SET updated_at = ? WHERE id = ?
+  `),
+
   listSessions: db.prepare(`
-    SELECT s.id, s.title, s.source, s.created_at AS createdAt, s.updated_at AS updatedAt,
+    SELECT s.id, s.title, s.source, s.project_id AS projectId,
+           s.created_at AS createdAt, s.updated_at AS updatedAt,
            COUNT(m.id) AS messageCount
     FROM sessions s
     LEFT JOIN messages m ON m.session_id = s.id
@@ -76,7 +125,7 @@ const stmts = {
   `),
 
   getSession: db.prepare(`
-    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId,
+    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId, project_id AS projectId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM sessions WHERE id = ?
   `),
@@ -87,8 +136,8 @@ const stmts = {
   `),
 
   insertSession: db.prepare(`
-    INSERT INTO sessions (id, title, session_id, source, chat_id, created_at, updated_at)
-    VALUES (@id, @title, @sessionId, @source, @chatId, @createdAt, @updatedAt)
+    INSERT INTO sessions (id, title, session_id, source, chat_id, project_id, created_at, updated_at)
+    VALUES (@id, @title, @sessionId, @source, @chatId, @projectId, @createdAt, @updatedAt)
   `),
 
   updateSession: db.prepare(`
@@ -103,7 +152,7 @@ const stmts = {
   `),
 
   findBySourceChat: db.prepare(`
-    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId,
+    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId, project_id AS projectId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM sessions WHERE source = ? AND chat_id = ?
     ORDER BY updated_at DESC LIMIT 1
@@ -118,6 +167,32 @@ const stmts = {
   `),
 };
 
+export function listProjects(): Project[] {
+  return stmts.listProjects.all() as Project[];
+}
+
+export function getProject(id: string): Project | null {
+  return (stmts.getProject.get(id) as Project | undefined) || null;
+}
+
+export function findProjectByPath(projectPath: string): Project | null {
+  return (stmts.findProjectByPath.get(projectPath) as Project | undefined) || null;
+}
+
+export function createProject(project: Project): void {
+  stmts.insertProject.run({
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    createdAt: project.createdAt,
+    updatedAt: project.updatedAt,
+  });
+}
+
+export function touchProject(id: string, updatedAt: number): void {
+  stmts.touchProject.run(updatedAt, id);
+}
+
 export function listSessions(): SessionSummary[] {
   return stmts.listSessions.all() as SessionSummary[];
 }
@@ -130,6 +205,7 @@ export function getSession(id: string): ChatSession | null {
         sessionId: string | null;
         source: string;
         chatId: string | null;
+        projectId: string | null;
         createdAt: number;
         updatedAt: number;
       }
@@ -153,6 +229,7 @@ export function createSession(session: ChatSession): void {
     sessionId: session.sessionId,
     source: session.source || "web",
     chatId: session.chatId || null,
+    projectId: session.projectId || null,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
   });
@@ -169,6 +246,7 @@ export function findSessionBySourceChat(
         sessionId: string | null;
         source: string;
         chatId: string | null;
+        projectId: string | null;
         createdAt: number;
         updatedAt: number;
       }

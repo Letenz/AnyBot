@@ -14,10 +14,10 @@ if (!sandboxModes.includes(sandboxRaw as SandboxMode)) {
 
 const sandbox = sandboxRaw as SandboxMode;
 
-function getSystemPrompt(): string {
+function getSystemPrompt(opts?: { workdir?: string; sandbox?: SandboxMode }): string {
   return buildSystemPrompt({
-    workdir,
-    sandbox,
+    workdir: opts?.workdir || workdir,
+    sandbox: opts?.sandbox || sandbox,
     extraPrompt: extraSystemPrompt,
   });
 }
@@ -31,8 +31,12 @@ function buildOutputContract(source: string): string {
   ].join("\n");
 }
 
-export function buildFirstTurnPrompt(userText: string, source: string = "web"): string {
-  return `${getSystemPrompt()}
+export function buildFirstTurnPrompt(
+  userText: string,
+  source: string = "web",
+  opts?: { workdir?: string; sandbox?: SandboxMode },
+): string {
+  return `${getSystemPrompt(opts)}
 
 输出要求：
 ${buildOutputContract(source)}

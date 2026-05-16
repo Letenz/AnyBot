@@ -40,6 +40,9 @@
         const inputEl = document.getElementById('chat-input');
         const sendBtn = document.getElementById('send-btn');
         const sidebar = document.getElementById('sidebar');
+        const projectToggle = document.getElementById('project-toggle');
+        const projectList = document.getElementById('project-list');
+        const addProjectBtn = document.getElementById('add-project-btn');
         const historyToggle = document.getElementById('history-toggle');
         const historyList = document.getElementById('history-list');
         const newChatBtn = document.getElementById('new-chat-btn');
@@ -55,13 +58,18 @@
         const currentProviderNameEl = document.getElementById('current-provider-name');
 
         let currentSessionId = null;
+        let currentSessionProjectId = null;
+        let activeProjectId = null;
         let isTyping = false;
         let sessions = [];
+        let projects = [];
         let modelConfig = null;
         let providerData = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
+        let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
+        let expandedProjectIds = readStoredSet('expandedProjectIds');
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -193,6 +201,8 @@
 
         sendBtn.addEventListener('click', sendMessage);
         newChatBtn.addEventListener('click', createNewChat);
+        projectToggle.addEventListener('click', toggleProjects);
+        addProjectBtn.addEventListener('click', addProject);
         historyToggle.addEventListener('click', toggleHistory);
 
         // 附件按钮 - 点击触发文件选择
@@ -455,6 +465,45 @@
             return groups;
         }
 
+        function readStoredSet(key) {
+            try {
+                return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+            } catch (_) {
+                return new Set();
+            }
+        }
+
+        function saveStoredSet(key, value) {
+            localStorage.setItem(key, JSON.stringify(Array.from(value)));
+        }
+
+        function folderIcon(open) {
+            return open
+                ? '<svg class="project-icon" viewBox="0 0 16 16" fill="none"><path d="M1.8 5.5h12.4l-1.1 6.3c-.1.7-.7 1.2-1.5 1.2H4.1c-.7 0-1.3-.5-1.5-1.2L1.8 5.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M2.4 5.5V3.6c0-.6.5-1.1 1.1-1.1h3l1.4 1.6h4.3c.6 0 1.1.5 1.1 1.1v.3" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>'
+                : '<svg class="project-icon" viewBox="0 0 16 16" fill="none"><path d="M2.4 12.7V3.6c0-.6.5-1.1 1.1-1.1h3l1.4 1.6h4.6c.6 0 1.1.5 1.1 1.1v7.5H2.4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
+        }
+
+        function formatRelativeAge(ts) {
+            var diff = Date.now() - (ts || Date.now());
+            var days = Math.max(0, Math.floor(diff / 86400000));
+            if (days === 0) return '今天';
+            if (days < 30) return days + ' 天';
+            var months = Math.floor(days / 30);
+            return months + ' 月';
+        }
+
+        function updateProjectsCollapsedState() {
+            sidebar.classList.toggle('projects-collapsed', isProjectsCollapsed);
+            projectToggle.setAttribute('aria-expanded', String(!isProjectsCollapsed));
+            projectToggle.title = isProjectsCollapsed ? '展开项目列表' : '折叠项目列表';
+        }
+
+        function toggleProjects() {
+            isProjectsCollapsed = !isProjectsCollapsed;
+            localStorage.setItem('projectsCollapsed', String(isProjectsCollapsed));
+            updateProjectsCollapsedState();
+        }
+
         function updateHistoryCollapsedState() {
             sidebar.classList.toggle('history-collapsed', isHistoryCollapsed);
             historyToggle.setAttribute('aria-expanded', String(!isHistoryCollapsed));
@@ -467,9 +516,44 @@
             updateHistoryCollapsedState();
         }
 
+        function createHistoryItem(s) {
+            var item = document.createElement('div');
+            item.className = 'history-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
+            item.dataset.id = s.id;
+
+            var effectiveSource = (s.source && s.source !== 'web') ? s.source : 'web';
+            var meta = CHANNEL_META[effectiveSource];
+            var badge = document.createElement('span');
+            badge.className = 'history-item-source ' + (meta ? meta.iconClass : 'default');
+            badge.textContent = meta ? meta.badge : effectiveSource;
+            item.appendChild(badge);
+
+            var text = document.createElement('span');
+            text.className = 'history-item-text';
+            text.textContent = s.title;
+
+            var del = document.createElement('button');
+            del.className = 'history-item-delete';
+            del.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+            del.addEventListener('click', function (e) {
+                e.stopPropagation();
+                deleteSession(s.id);
+            });
+
+            item.appendChild(text);
+            item.appendChild(del);
+
+            item.addEventListener('click', function () {
+                loadSession(s.id);
+            });
+
+            return item;
+        }
+
         function renderHistory() {
             historyList.innerHTML = '';
-            var groups = groupSessionsByDate(sessions);
+            var globalSessions = sessions.filter(function (s) { return !s.projectId; });
+            var groups = groupSessionsByDate(globalSessions);
 
             Object.keys(groups).forEach(function (label) {
                 var items = groups[label];
@@ -484,40 +568,83 @@
                 group.appendChild(groupLabel);
 
                 items.forEach(function (s) {
-                    var item = document.createElement('div');
-                    item.className = 'history-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
-                    item.dataset.id = s.id;
-
-                    var effectiveSource = (s.source && s.source !== 'web') ? s.source : 'web';
-                    var meta = CHANNEL_META[effectiveSource];
-                    var badge = document.createElement('span');
-                    badge.className = 'history-item-source ' + (meta ? meta.iconClass : 'default');
-                    badge.textContent = meta ? meta.badge : effectiveSource;
-                    item.appendChild(badge);
-
-                    var text = document.createElement('span');
-                    text.className = 'history-item-text';
-                    text.textContent = s.title;
-
-                    var del = document.createElement('button');
-                    del.className = 'history-item-delete';
-                    del.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
-                    del.addEventListener('click', function (e) {
-                        e.stopPropagation();
-                        deleteSession(s.id);
-                    });
-
-                    item.appendChild(text);
-                    item.appendChild(del);
-
-                    item.addEventListener('click', function () {
-                        loadSession(s.id);
-                    });
-
-                    group.appendChild(item);
+                    group.appendChild(createHistoryItem(s));
                 });
 
                 historyList.appendChild(group);
+            });
+        }
+
+        function selectProject(projectId) {
+            activeProjectId = projectId;
+            expandedProjectIds.add(projectId);
+            saveStoredSet('expandedProjectIds', expandedProjectIds);
+            if (currentView !== 'chat') showChatView();
+            renderProjects();
+        }
+
+        function renderProjectSessions(projectId) {
+            var list = document.createElement('div');
+            var projectSessions = sessions.filter(function (s) { return s.projectId === projectId; });
+            if (projectSessions.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'project-empty';
+                empty.textContent = '暂无对话';
+                list.appendChild(empty);
+                return list;
+            }
+
+            projectSessions.forEach(function (s) {
+                var btn = document.createElement('button');
+                btn.className = 'project-session-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
+                btn.type = 'button';
+                btn.innerHTML =
+                    '<span class="project-session-title"></span>' +
+                    '<span class="project-session-age"></span>';
+                btn.querySelector('.project-session-title').textContent = s.title;
+                btn.querySelector('.project-session-age').textContent = formatRelativeAge(s.updatedAt || s.createdAt);
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    loadSession(s.id);
+                });
+                list.appendChild(btn);
+            });
+
+            return list;
+        }
+
+        function renderProjects() {
+            projectList.innerHTML = '';
+            projects.forEach(function (project) {
+                var isExpanded = expandedProjectIds.has(project.id);
+                var row = document.createElement('button');
+                row.className = 'project-item' + (activeProjectId === project.id ? ' active' : '');
+                row.type = 'button';
+                row.setAttribute('aria-expanded', String(isExpanded));
+                row.innerHTML = folderIcon(isExpanded) + '<span class="project-name"></span>';
+                row.querySelector('.project-name').textContent = project.name;
+                row.addEventListener('click', function () {
+                    if (activeProjectId === project.id) {
+                        if (isExpanded) {
+                            expandedProjectIds.delete(project.id);
+                        } else {
+                            expandedProjectIds.add(project.id);
+                        }
+                        saveStoredSet('expandedProjectIds', expandedProjectIds);
+                        renderProjects();
+                        return;
+                    }
+                    selectProject(project.id);
+                });
+                projectList.appendChild(row);
+
+                if (!isExpanded) return;
+
+                var details = document.createElement('div');
+                details.className = 'project-details';
+                details.appendChild(renderProjectSessions(project.id));
+
+                projectList.appendChild(details);
             });
         }
 
@@ -526,8 +653,37 @@
                 var res = await fetch('/api/sessions');
                 sessions = await res.json();
                 renderHistory();
+                renderProjects();
             } catch (e) {
                 console.error('Failed to fetch sessions:', e);
+            }
+        }
+
+        async function fetchProjects() {
+            try {
+                var res = await fetch('/api/projects');
+                projects = await res.json();
+                renderProjects();
+            } catch (e) {
+                console.error('Failed to fetch projects:', e);
+            }
+        }
+
+        async function addProject() {
+            try {
+                addProjectBtn.disabled = true;
+                var res = await fetch('/api/projects/pick', { method: 'POST' });
+                var data = await res.json();
+                if (!res.ok) throw new Error(data.error || '添加项目失败');
+                activeProjectId = data.id;
+                expandedProjectIds.add(data.id);
+                saveStoredSet('expandedProjectIds', expandedProjectIds);
+                await Promise.all([fetchProjects(), fetchSessions()]);
+                selectProject(data.id);
+            } catch (e) {
+                showError(e.message || '添加项目失败');
+            } finally {
+                addProjectBtn.disabled = false;
             }
         }
 
@@ -535,14 +691,20 @@
             if (currentView !== 'chat') {
                 showChatView();
             }
-            if (currentSessionId && !document.querySelector('#messages .message-row')) {
+            if (currentSessionId && currentSessionProjectId === activeProjectId && !document.querySelector('#messages .message-row')) {
                 inputEl.focus();
                 return;
             }
             try {
-                var res = await fetch('/api/sessions', {method: 'POST'});
+                var res = await fetch('/api/sessions', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ projectId: activeProjectId }),
+                });
                 var data = await res.json();
+                if (!res.ok) throw new Error(data.error || '创建会话失败');
                 currentSessionId = data.id;
+                currentSessionProjectId = data.projectId || null;
                 showChatView();
                 showEmptyState();
                 inputEl.value = '';
@@ -551,7 +713,7 @@
                 inputEl.focus();
                 await fetchSessions();
             } catch (e) {
-                showError('创建会话失败');
+                showError(e.message || '创建会话失败');
             }
         }
 
@@ -628,6 +790,12 @@
                 }
                 var data = await res.json();
                 currentSessionId = id;
+                currentSessionProjectId = data.projectId || null;
+                activeProjectId = data.projectId || null;
+                if (activeProjectId) {
+                    expandedProjectIds.add(activeProjectId);
+                    saveStoredSet('expandedProjectIds', expandedProjectIds);
+                }
 
                 showChatView();
 
@@ -661,6 +829,7 @@
                 }
 
                 renderHistory();
+                renderProjects();
                 inputEl.focus();
             } catch (e) {
                 showError('加载会话失败');
@@ -672,6 +841,7 @@
                 await fetch('/api/sessions/' + id, {method: 'DELETE'});
                 if (currentSessionId === id) {
                     currentSessionId = null;
+                    currentSessionProjectId = null;
                     showEmptyState();
                 }
                 await fetchSessions();
@@ -956,6 +1126,7 @@
             chatView.style.display = 'flex';
             newChatBtn.classList.add('active');
             renderHistory();
+            renderProjects();
         }
 
         function showChannelsPage() {
@@ -1888,8 +2059,9 @@
         });
 
         async function init() {
+            updateProjectsCollapsedState();
             updateHistoryCollapsedState();
-            await Promise.all([fetchSessions(), fetchModelConfig(), fetchProviders(), fetchProxyConfig()]);
+            await Promise.all([fetchProjects(), fetchSessions(), fetchModelConfig(), fetchProviders(), fetchProxyConfig()]);
             if (sessions.length > 0) {
                 await loadSession(sessions[0].id);
             } else {

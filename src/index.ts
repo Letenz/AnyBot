@@ -170,6 +170,7 @@ function getOrCreateChannelSession(
     sessionId: null,
     source,
     chatId,
+    projectId: null,
     messages: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),

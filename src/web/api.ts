@@ -3,6 +3,8 @@ import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
+import { promisify } from "node:util";
 import type { Request, Response } from "express";
 import { getProvider, getRegisteredProviderTypes } from "../providers/index.js";
 import { logger } from "../logger.js";
@@ -43,6 +45,8 @@ import {
 } from "../shared.js";
 import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
 import type { IProvider } from "../providers/index.js";
+
+const execFile = promisify(execFileCallback);
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
@@ -104,9 +108,9 @@ async function hydrateChangeReviewMetadata(
   );
 }
 
-async function safeCreateChangeSnapshot(): Promise<Awaited<ReturnType<typeof createChangeSnapshot>>> {
+async function safeCreateChangeSnapshotForWorkdir(workdir: string): Promise<Awaited<ReturnType<typeof createChangeSnapshot>>> {
   try {
-    return await createChangeSnapshot(getWorkdir());
+    return await createChangeSnapshot(workdir);
   } catch (error) {
     logger.warn("change_review.snapshot_failed", { error });
     return null;
@@ -186,6 +190,91 @@ function finishAgentStream(sessionId: string, active: ActiveAgentStream): void {
   activeAgentStreams.delete(sessionId);
 }
 
+function normalizeProjectPath(inputPath: string): string {
+  if (!inputPath || typeof inputPath !== "string") {
+    throw new Error("缺少项目路径");
+  }
+  const resolved = fs.realpathSync(path.resolve(inputPath));
+  const stat = fs.statSync(resolved);
+  if (!stat.isDirectory()) {
+    throw new Error("项目路径必须是文件夹");
+  }
+  return resolved;
+}
+
+function createOrTouchProject(projectPath: string): db.Project {
+  const normalizedPath = normalizeProjectPath(projectPath);
+  const existing = db.findProjectByPath(normalizedPath);
+  if (existing) {
+    db.touchProject(existing.id, Date.now());
+    return { ...existing, updatedAt: Date.now() };
+  }
+  const now = Date.now();
+  const project: db.Project = {
+    id: generateId(),
+    name: path.basename(normalizedPath) || normalizedPath,
+    path: normalizedPath,
+    createdAt: now,
+    updatedAt: now,
+  };
+  db.createProject(project);
+  return project;
+}
+
+async function pickProjectFolder(): Promise<string> {
+  if (process.platform !== "darwin") {
+    throw new Error("当前系统暂不支持从浏览器唤起本地文件夹选择器");
+  }
+  const { stdout } = await execFile("osascript", [
+    "-e",
+    'POSIX path of (choose folder with prompt "选择项目文件夹")',
+  ]);
+  return stdout.trim();
+}
+
+function ensurePathInsideProject(projectPath: string, relativePath: string): string {
+  const root = normalizeProjectPath(projectPath);
+  const target = path.resolve(root, relativePath || ".");
+  if (target !== root && !target.startsWith(root + path.sep)) {
+    throw new Error("目录路径越界");
+  }
+  return target;
+}
+
+function readProjectTree(project: db.Project, relativePath: string): Array<{
+  name: string;
+  path: string;
+  type: "directory" | "file";
+}> {
+  const target = ensurePathInsideProject(project.path, relativePath);
+  const stat = fs.statSync(target);
+  if (!stat.isDirectory()) {
+    throw new Error("目标路径不是文件夹");
+  }
+
+  return fs.readdirSync(target, { withFileTypes: true })
+    .filter((entry) => entry.name !== "node_modules" && entry.name !== ".git")
+    .slice(0, 200)
+    .map((entry) => ({
+      name: entry.name,
+      path: path.relative(project.path, path.join(target, entry.name)),
+      type: entry.isDirectory() ? "directory" as const : "file" as const,
+    }))
+    .sort((a, b) => {
+      if (a.type !== b.type) return a.type === "directory" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+function getSessionWorkdir(session: db.ChatSession): string {
+  if (!session.projectId) return getWorkdir();
+  const project = db.getProject(session.projectId);
+  if (!project) {
+    throw new Error("项目不存在");
+  }
+  return normalizeProjectPath(project.path);
+}
+
 // 上传目录：使用配置的工作目录
 const UPLOAD_DIR = path.join(getWorkdir(), "tmp", "uploads");
 try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (_) {}
@@ -209,18 +298,68 @@ const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } }); // 5
 export function chatRouter(): Router {
   const router = Router();
 
+  router.get("/projects", (_req: Request, res: Response) => {
+    res.json(db.listProjects());
+  });
+
+  router.post("/projects", (req: Request, res: Response) => {
+    const { path: projectPath } = req.body as { path?: string };
+    try {
+      const project = createOrTouchProject(projectPath || "");
+      res.json(project);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "添加项目失败" });
+    }
+  });
+
+  router.post("/projects/pick", async (_req: Request, res: Response) => {
+    try {
+      const projectPath = await pickProjectFolder();
+      const project = createOrTouchProject(projectPath);
+      res.json(project);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "选择项目失败" });
+    }
+  });
+
+  router.get("/projects/:id/tree", (req: Request, res: Response) => {
+    const project = db.getProject(req.params.id as string);
+    if (!project) {
+      res.status(404).json({ error: "项目不存在" });
+      return;
+    }
+
+    try {
+      const relativePath = typeof req.query.path === "string" ? req.query.path : "";
+      res.json({
+        projectId: project.id,
+        path: relativePath,
+        children: readProjectTree(project, relativePath),
+      });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "读取目录失败" });
+    }
+  });
+
   router.get("/sessions", (_req: Request, res: Response) => {
     const list = db.listSessions();
     res.json(list);
   });
 
-  router.post("/sessions", (_req: Request, res: Response) => {
+  router.post("/sessions", (req: Request, res: Response) => {
+    const { projectId } = req.body as { projectId?: string | null };
+    if (projectId && !db.getProject(projectId)) {
+      res.status(404).json({ error: "项目不存在" });
+      return;
+    }
+
     const session: db.ChatSession = {
       id: generateId(),
       title: "新对话",
       sessionId: null,
       source: "web",
       chatId: null,
+      projectId: projectId || null,
       messages: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -239,6 +378,7 @@ export function chatRouter(): Router {
     res.json({
       id: session.id,
       title: session.title,
+      projectId: session.projectId,
       messages: await hydrateChangeReviewMetadata(session.messages),
       activeStream: activeAgentStreams.has(session.id)
         ? { startedAt: activeAgentStreams.get(session.id)?.startedAt }
@@ -622,6 +762,14 @@ export function chatRouter(): Router {
       return;
     }
 
+    let sessionWorkdir: string;
+    try {
+      sessionWorkdir = getSessionWorkdir(session);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "项目目录不可用" });
+      return;
+    }
+
     let userText = (content || "").trim();
     const imagePaths: string[] = [];
     const filePaths: { path: string; name: string }[] = [];
@@ -661,7 +809,7 @@ export function chatRouter(): Router {
 
     const prompt = session.sessionId
       ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText);
+      : buildFirstTurnPrompt(userText, "web", { workdir: sessionWorkdir, sandbox: getSandbox() });
 
     const active: ActiveAgentStream = {
       events: [],
@@ -686,14 +834,15 @@ export function chatRouter(): Router {
           sessionId: session.id,
           providerSessionId: session.sessionId,
           provider: provider.type,
+          workdir: sessionWorkdir,
           userTextChars: userText.length,
           imageCount: imagePaths.length,
           fileCount: filePaths.length,
         });
 
-        const changeSnapshot = await safeCreateChangeSnapshot();
+        const changeSnapshot = await safeCreateChangeSnapshotForWorkdir(sessionWorkdir);
         const result = await provider.runWithEvents({
-          workdir: getWorkdir(),
+          workdir: sessionWorkdir,
           sandbox: getSandbox(),
           model: getCurrentModel(),
           prompt,
@@ -773,6 +922,14 @@ export function chatRouter(): Router {
       return;
     }
 
+    let sessionWorkdir: string;
+    try {
+      sessionWorkdir = getSessionWorkdir(session);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "项目目录不可用" });
+      return;
+    }
+
     // 构建包含附件信息的用户文本
     let userText = (content || "").trim();
     const imagePaths: string[] = [];
@@ -810,7 +967,7 @@ export function chatRouter(): Router {
 
     const prompt = session.sessionId
       ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText);
+      : buildFirstTurnPrompt(userText, "web", { workdir: sessionWorkdir, sandbox: getSandbox() });
 
     try {
       const provider = getProvider();
@@ -818,14 +975,15 @@ export function chatRouter(): Router {
         sessionId: session.id,
         providerSessionId: session.sessionId,
         provider: provider.type,
+        workdir: sessionWorkdir,
         userTextChars: userText.length,
         imageCount: imagePaths.length,
         fileCount: filePaths.length,
       });
 
-      const changeSnapshot = await safeCreateChangeSnapshot();
+      const changeSnapshot = await safeCreateChangeSnapshotForWorkdir(sessionWorkdir);
       const result = await provider.run({
-        workdir: getWorkdir(),
+        workdir: sessionWorkdir,
         sandbox: getSandbox(),
         model: getCurrentModel(),
         prompt,
