@@ -81,12 +81,29 @@
     color: var(--text);
 }
 
+.change-review-file-main {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 8px;
+}
+
 .change-review-file-path {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
+}
+
+.change-review-file-status {
+    flex: 0 0 auto;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 1px 6px;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 1.5;
 }
 
 .change-review-chevron {
@@ -140,28 +157,44 @@
     border-radius: 99px;
 }
 
-.change-review-diff span {
-    display: block;
-    padding: 0 14px;
+.change-review-diff > .line {
+    display: grid;
+    grid-template-columns: 28px minmax(max-content, 1fr);
+    align-items: start;
     white-space: pre;
 }
 
-.change-review-diff .add {
+.change-review-diff > .line .gutter {
+    padding-left: 12px;
+    color: rgba(156, 163, 175, 0.62);
+    user-select: none;
+}
+
+.change-review-diff > .line .code {
+    padding: 0 14px 0 4px;
+}
+
+.change-review-diff > .line.add {
     color: #bbf7d0;
     background: rgba(34, 197, 94, 0.1);
 }
 
-.change-review-diff .del {
+.change-review-diff > .line.del {
     color: #fecaca;
     background: rgba(248, 113, 113, 0.11);
 }
 
-.change-review-diff .hunk {
+.change-review-diff > .line.hunk {
     color: #c4b5fd;
     background: rgba(124, 111, 247, 0.1);
 }
 
-.change-review-diff .meta {
+.change-review-diff > .line.hunk .code {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+}
+
+.change-review-diff > .line.meta {
     color: #8b8ba3;
 }
 

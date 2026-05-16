@@ -16,22 +16,80 @@
         return '待审核';
     }
 
-    function renderDiff(diff) {
-        return String(diff || '').split('\n').map(function (line) {
-            var cls = 'ctx';
-            if (line.startsWith('+') && !line.startsWith('+++')) cls = 'add';
-            if (line.startsWith('-') && !line.startsWith('---')) cls = 'del';
-            if (line.startsWith('@@')) cls = 'hunk';
-            if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) cls = 'meta';
-            return '<span class="' + cls + '">' + escapeHtml(line || ' ') + '</span>';
-        }).join('\n');
+    function statusLabel(status) {
+        if (status === 'added') return '新增';
+        if (status === 'deleted') return '删除';
+        return '修改';
     }
 
-    function renderFile(file) {
+    function hunkText(line) {
+        var match = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/.exec(line);
+        return match ? '第 ' + match[1] + ' 行附近' : '变更位置';
+    }
+
+    function renderDiffLine(cls, prefix, content) {
         return '' +
-            '<details class="change-review-file">' +
+            '<span class="line ' + cls + '">' +
+            '<span class="gutter">' + escapeHtml(prefix) + '</span>' +
+            '<span class="code">' + escapeHtml(content || ' ') + '</span>' +
+            '</span>';
+    }
+
+    function renderDiff(diff) {
+        var lines = String(diff || '').split('\n');
+        var rendered = [];
+
+        lines.forEach(function (line) {
+            var cls = 'ctx';
+            var prefix = '';
+            var content = line;
+
+            if (
+                line.startsWith('diff --git') ||
+                line.startsWith('index ') ||
+                line.startsWith('---') ||
+                line.startsWith('+++')
+            ) {
+                return;
+            }
+
+            if (line === 'Binary files differ') {
+                rendered.push(renderDiffLine('meta', '', '二进制文件有变化'));
+                return;
+            }
+
+            if (line.startsWith('@@')) {
+                rendered.push(renderDiffLine('hunk', '', hunkText(line)));
+                return;
+            }
+
+            if (line.startsWith('+')) {
+                cls = 'add';
+                prefix = '+';
+                content = line.slice(1);
+            } else if (line.startsWith('-')) {
+                cls = 'del';
+                prefix = '-';
+                content = line.slice(1);
+            } else if (line.startsWith(' ')) {
+                content = line.slice(1);
+            }
+
+            rendered.push(renderDiffLine(cls, prefix, content));
+        });
+
+        return rendered.join('\n') || renderDiffLine('meta', '', '没有可展示的文本变化');
+    }
+
+    function renderFile(file, index) {
+        var open = index === 0 ? ' open' : '';
+        return '' +
+            '<details class="change-review-file"' + open + '>' +
             '<summary>' +
+            '<span class="change-review-file-main">' +
             '<span class="change-review-file-path">' + escapeHtml(file.path) + '</span>' +
+            '<span class="change-review-file-status">' + statusLabel(file.status) + '</span>' +
+            '</span>' +
             '<span class="change-review-file-counts">' +
             '<span class="add">' + signedCount(file.additions, '+') + '</span>' +
             '<span class="del">' + signedCount(file.deletions, '-') + '</span>' +
