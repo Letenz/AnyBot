@@ -67,6 +67,7 @@
         let providerData = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
+        let isBatchRenderingMessages = false;
         let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
         let expandedProjectIds = readStoredSet('expandedProjectIds');
@@ -308,6 +309,7 @@
         }
 
         function scrollBottom() {
+            if (isBatchRenderingMessages) return;
             messagesEl.scrollTop = messagesEl.scrollHeight;
         }
 
@@ -516,16 +518,21 @@
             updateHistoryCollapsedState();
         }
 
-        function createHistoryItem(s) {
-            var item = document.createElement('div');
-            item.className = 'history-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
-            item.dataset.id = s.id;
-
+        function createSourceBadge(s) {
             var effectiveSource = (s.source && s.source !== 'web') ? s.source : 'web';
             var meta = CHANNEL_META[effectiveSource];
             var badge = document.createElement('span');
             badge.className = 'history-item-source ' + (meta ? meta.iconClass : 'default');
             badge.textContent = meta ? meta.badge : effectiveSource;
+            return badge;
+        }
+
+        function createHistoryItem(s) {
+            var item = document.createElement('div');
+            item.className = 'history-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
+            item.dataset.id = s.id;
+
+            var badge = createSourceBadge(s);
             item.appendChild(badge);
 
             var text = document.createElement('span');
@@ -595,16 +602,33 @@
             }
 
             projectSessions.forEach(function (s) {
-                var btn = document.createElement('button');
+                var btn = document.createElement('div');
                 btn.className = 'project-session-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
-                btn.type = 'button';
+                btn.setAttribute('role', 'button');
+                btn.tabIndex = 0;
+                btn.dataset.id = s.id;
                 btn.innerHTML =
+                    '<span class="project-session-source"></span>' +
                     '<span class="project-session-title"></span>' +
-                    '<span class="project-session-age"></span>';
+                    '<span class="project-session-age"></span>' +
+                    '<button class="project-session-delete" type="button" title="删除对话" aria-label="删除对话">' +
+                    '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' +
+                    '</button>';
+                btn.replaceChild(createSourceBadge(s), btn.querySelector('.project-session-source'));
                 btn.querySelector('.project-session-title').textContent = s.title;
                 btn.querySelector('.project-session-age').textContent = formatRelativeAge(s.updatedAt || s.createdAt);
+                btn.querySelector('.project-session-delete').addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    deleteSession(s.id);
+                });
                 btn.addEventListener('click', function (e) {
                     e.stopPropagation();
+                    loadSession(s.id);
+                });
+                btn.addEventListener('keydown', function (e) {
+                    if (e.target !== btn) return;
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
                     loadSession(s.id);
                 });
                 list.appendChild(btn);
@@ -620,6 +644,7 @@
                 var row = document.createElement('button');
                 row.className = 'project-item' + (activeProjectId === project.id ? ' active' : '');
                 row.type = 'button';
+                row.dataset.id = project.id;
                 row.setAttribute('aria-expanded', String(isExpanded));
                 row.innerHTML = folderIcon(isExpanded) + '<span class="project-name"></span>';
                 row.querySelector('.project-name').textContent = project.name;
@@ -645,6 +670,19 @@
                 details.appendChild(renderProjectSessions(project.id));
 
                 projectList.appendChild(details);
+            });
+        }
+
+        function updateSidebarSelection() {
+            var isChat = currentView === 'chat';
+            historyList.querySelectorAll('.history-item').forEach(function (item) {
+                item.classList.toggle('active', isChat && item.dataset.id === currentSessionId);
+            });
+            projectList.querySelectorAll('.project-item').forEach(function (item) {
+                item.classList.toggle('active', isChat && item.dataset.id === activeProjectId);
+            });
+            projectList.querySelectorAll('.project-session-item').forEach(function (item) {
+                item.classList.toggle('active', isChat && item.dataset.id === currentSessionId);
             });
         }
 
@@ -782,6 +820,11 @@
         }
 
         async function loadSession(id) {
+            if (id === currentSessionId && currentView === 'chat') {
+                inputEl.focus();
+                return;
+            }
+
             try {
                 stopActiveStreamSubscription();
                 var res = await fetch('/api/sessions/' + id);
@@ -790,47 +833,56 @@
                     return;
                 }
                 var data = await res.json();
+                var wasChatView = currentView === 'chat';
                 currentSessionId = id;
                 currentSessionProjectId = data.projectId || null;
                 activeProjectId = data.projectId || null;
-                if (activeProjectId) {
+                var didExpandProject = false;
+                if (activeProjectId && !expandedProjectIds.has(activeProjectId)) {
                     expandedProjectIds.add(activeProjectId);
                     saveStoredSet('expandedProjectIds', expandedProjectIds);
+                    didExpandProject = true;
                 }
 
-                showChatView();
+                if (!wasChatView) showChatView();
 
                 messagesEl.innerHTML = '';
-                if (data.messages.length === 0) {
-                    showEmptyState();
-                } else {
-                    data.messages.forEach(function (m) {
-                        var attInfo = null;
-                        var meta = parseMessageMetadata(m.metadata);
-                        if (meta.attachments && meta.attachments.length > 0) {
-                            attInfo = meta.attachments;
-                        }
-                        if (m.role === 'assistant' && meta.claudeAgentLoop && window.ClaudeAgentLoop && window.ClaudeAgentLoop.renderPersistedMessage) {
-                            clearEmpty();
-                            window.ClaudeAgentLoop.renderPersistedMessage({
-                                messagesEl: messagesEl,
-                                scrollBottom: scrollBottom,
-                                content: m.content,
-                                loop: meta.claudeAgentLoop,
-                                changeReview: meta.changeReview,
-                            });
-                            return;
-                        }
-                        appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview);
-                    });
+                isBatchRenderingMessages = true;
+                try {
+                    if (data.messages.length === 0) {
+                        showEmptyState();
+                    } else {
+                        data.messages.forEach(function (m) {
+                            var attInfo = null;
+                            var meta = parseMessageMetadata(m.metadata);
+                            if (meta.attachments && meta.attachments.length > 0) {
+                                attInfo = meta.attachments;
+                            }
+                            if (m.role === 'assistant' && meta.claudeAgentLoop && window.ClaudeAgentLoop && window.ClaudeAgentLoop.renderPersistedMessage) {
+                                clearEmpty();
+                                window.ClaudeAgentLoop.renderPersistedMessage({
+                                    messagesEl: messagesEl,
+                                    scrollBottom: scrollBottom,
+                                    content: m.content,
+                                    loop: meta.claudeAgentLoop,
+                                    changeReview: meta.changeReview,
+                                });
+                                return;
+                            }
+                            appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview);
+                        });
+                    }
+                } finally {
+                    isBatchRenderingMessages = false;
                 }
+                scrollBottom();
 
                 if (data.activeStream) {
                     resumeActiveStream(id, data.activeStream);
                 }
 
-                renderHistory();
-                renderProjects();
+                if (wasChatView && didExpandProject) renderProjects();
+                updateSidebarSelection();
                 inputEl.focus();
             } catch (e) {
                 showError('加载会话失败');

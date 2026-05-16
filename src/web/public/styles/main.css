@@ -306,6 +306,17 @@
             color: var(--text);
         }
 
+        #add-project-btn {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .sidebar-section-header:hover #add-project-btn,
+        #add-project-btn:focus-visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
         .section-toggle-icon {
             flex-shrink: 0;
             transition: transform 0.16s ease;
@@ -421,10 +432,11 @@
 
         .project-session-item {
             min-height: 38px;
-            padding: 8px 10px 8px 40px;
+            padding: 8px 48px 8px 40px;
             border-radius: 8px;
             font-size: 13px;
             gap: 10px;
+            position: relative;
         }
 
         .project-session-item:hover {
@@ -449,7 +461,44 @@
             color: var(--text-dim);
             font-size: 13px;
             flex-shrink: 0;
-            margin-left: auto;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            transition: opacity 0.15s ease;
+        }
+
+        .project-session-delete {
+            opacity: 0;
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            cursor: pointer;
+            padding: 2px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .project-session-item:hover .project-session-age,
+        .project-session-item:focus-within .project-session-age {
+            opacity: 0;
+        }
+
+        .project-session-item:hover .project-session-delete,
+        .project-session-item:focus-within .project-session-delete {
+            opacity: 1;
+        }
+
+        .project-session-delete:hover {
+            color: #f87171;
+            background: rgba(248, 113, 113, 0.1);
         }
 
         .project-empty {
