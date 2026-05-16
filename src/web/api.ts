@@ -829,7 +829,11 @@ export function chatRouter(): Router {
 
     const prompt = session.sessionId
       ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText, "web", { workdir: sessionWorkdir, sandbox: getSandbox() });
+      : buildFirstTurnPrompt(userText, "web", {
+          workdir: sessionWorkdir,
+          sandbox: getSandbox(),
+          includeWorkspaceMemory: !session.projectId,
+        });
 
     const active: ActiveAgentStream = {
       events: [],
@@ -987,7 +991,11 @@ export function chatRouter(): Router {
 
     const prompt = session.sessionId
       ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText, "web", { workdir: sessionWorkdir, sandbox: getSandbox() });
+      : buildFirstTurnPrompt(userText, "web", {
+          workdir: sessionWorkdir,
+          sandbox: getSandbox(),
+          includeWorkspaceMemory: !session.projectId,
+        });
 
     try {
       const provider = getProvider();

@@ -17,9 +17,11 @@ export function buildSystemPrompt(options: {
   sandbox: string;
   extraPrompt?: string;
   isFirstTurn?: boolean;
+  includeWorkspaceMemory?: boolean;
 }): string {
   const platform = process.platform;
   const env = `[环境] 工作目录=${options.workdir} sandbox=${options.sandbox} os=${platform}`;
+  const includeWorkspaceMemory = options.includeWorkspaceMemory !== false;
 
   const launchRule = [
     "启动应用程序时必须确保应用独立于当前进程运行，不会因为当前命令结束而关闭：",
@@ -29,7 +31,7 @@ export function buildSystemPrompt(options: {
     "- 禁止直接执行应用二进制文件（除非已用上述方式包裹）",
   ].join("\n");
 
-  if (options.isFirstTurn !== false) {
+  if (options.isFirstTurn !== false && includeWorkspaceMemory) {
     const bootstrap = readBootstrap(options.workdir);
     if (bootstrap) {
       const parts = [env, launchRule, bootstrap];
@@ -40,7 +42,7 @@ export function buildSystemPrompt(options: {
 
   const parts = [env, launchRule];
 
-  if (options.isFirstTurn !== false) {
+  if (options.isFirstTurn !== false && includeWorkspaceMemory) {
     parts.push(
       [
         "请先读取工作目录下的 AGENTS.md、MEMORY.md 和 PROFILE.md（如果存在），遵循其中的规则，并结合记忆上下文来回复用户。",

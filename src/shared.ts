@@ -14,11 +14,16 @@ if (!sandboxModes.includes(sandboxRaw as SandboxMode)) {
 
 const sandbox = sandboxRaw as SandboxMode;
 
-function getSystemPrompt(opts?: { workdir?: string; sandbox?: SandboxMode }): string {
+function getSystemPrompt(opts?: {
+  workdir?: string;
+  sandbox?: SandboxMode;
+  includeWorkspaceMemory?: boolean;
+}): string {
   return buildSystemPrompt({
     workdir: opts?.workdir || workdir,
     sandbox: opts?.sandbox || sandbox,
     extraPrompt: extraSystemPrompt,
+    includeWorkspaceMemory: opts?.includeWorkspaceMemory,
   });
 }
 
@@ -34,7 +39,11 @@ function buildOutputContract(source: string): string {
 export function buildFirstTurnPrompt(
   userText: string,
   source: string = "web",
-  opts?: { workdir?: string; sandbox?: SandboxMode },
+  opts?: {
+    workdir?: string;
+    sandbox?: SandboxMode;
+    includeWorkspaceMemory?: boolean;
+  },
 ): string {
   return `${getSystemPrompt(opts)}
 
