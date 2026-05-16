@@ -24,6 +24,14 @@ import { getWeixinLoginStatus } from "../channels/weixin.js";
 import { listSkills, toggleSkill, deleteSkill, openSkillsFolder } from "./skills.js";
 import { readProxyConfig, writeProxyConfig, getProxyUrl, type ProxyConfig } from "./proxy-config.js";
 import { applyProxy } from "../proxy.js";
+import {
+  approveChangeReview,
+  collectChangeReview,
+  createChangeSnapshot,
+  getChangeReview,
+  revertChangeReview,
+  type PublicChangeReview,
+} from "./change-review.js";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 import {
   buildFirstTurnPrompt,
@@ -54,19 +62,77 @@ function isStreamingProvider(
   return typeof provider.runWithEvents === "function";
 }
 
-function buildAgentLoopMetadata(provider: string, events: ClaudeAgentStreamEvent[]): string {
-  return JSON.stringify({
-    claudeAgentLoop: {
+function buildAssistantMetadata(opts: {
+  provider?: string;
+  events?: ClaudeAgentStreamEvent[];
+  changeReview?: PublicChangeReview | null;
+}): string | null {
+  const metadata: Record<string, unknown> = {};
+  if (opts.provider && opts.events) {
+    metadata.claudeAgentLoop = {
       version: 1,
-      provider,
-      events,
-    },
-  });
+      provider: opts.provider,
+      events: opts.events,
+    };
+  }
+  if (opts.changeReview) {
+    metadata.changeReview = opts.changeReview;
+  }
+  return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
+}
+
+async function hydrateChangeReviewMetadata(
+  messages: db.ChatSession["messages"],
+): Promise<db.ChatSession["messages"]> {
+  return Promise.all(
+    messages.map(async (message) => {
+      if (!message.metadata) return message;
+      try {
+        const metadata = JSON.parse(message.metadata) as Record<string, unknown>;
+        const existing = metadata.changeReview as { id?: string } | undefined;
+        if (!existing?.id) return message;
+        const hydrated = await getChangeReview(existing.id);
+        if (!hydrated) return message;
+        return {
+          ...message,
+          metadata: JSON.stringify({ ...metadata, changeReview: hydrated }),
+        };
+      } catch {
+        return message;
+      }
+    }),
+  );
+}
+
+async function safeCreateChangeSnapshot(): Promise<Awaited<ReturnType<typeof createChangeSnapshot>>> {
+  try {
+    return await createChangeSnapshot(getWorkdir());
+  } catch (error) {
+    logger.warn("change_review.snapshot_failed", { error });
+    return null;
+  }
+}
+
+async function safeCollectChangeReview(
+  snapshot: Awaited<ReturnType<typeof createChangeSnapshot>>,
+): Promise<PublicChangeReview | null> {
+  try {
+    return await collectChangeReview(snapshot);
+  } catch (error) {
+    logger.warn("change_review.collect_failed", { error });
+    return null;
+  }
 }
 
 type AgentStreamEvent =
   | ClaudeAgentStreamEvent
-  | { type: "result"; content: string; title: string; sessionId: string | null }
+  | {
+      type: "result";
+      content: string;
+      title: string;
+      sessionId: string | null;
+      changeReview?: PublicChangeReview | null;
+    }
   | { type: "error"; error: string }
   | { type: "done" };
 
@@ -163,7 +229,7 @@ export function chatRouter(): Router {
     res.json({ id: session.id, title: session.title });
   });
 
-  router.get("/sessions/:id", (req: Request, res: Response) => {
+  router.get("/sessions/:id", async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const session = db.getSession(id);
     if (!session) {
@@ -173,7 +239,7 @@ export function chatRouter(): Router {
     res.json({
       id: session.id,
       title: session.title,
-      messages: session.messages,
+      messages: await hydrateChangeReviewMetadata(session.messages),
       activeStream: activeAgentStreams.has(session.id)
         ? { startedAt: activeAgentStreams.get(session.id)?.startedAt }
         : null,
@@ -402,6 +468,32 @@ export function chatRouter(): Router {
     }
   });
 
+  // --- Change review actions ---
+
+  router.post("/change-reviews/:id/approve", async (req: Request, res: Response) => {
+    try {
+      const review = await approveChangeReview(req.params.id as string);
+      res.json({ ok: true, review });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "审核失败";
+      res.status(404).json({ error: msg });
+    }
+  });
+
+  router.post("/change-reviews/:id/revert", async (req: Request, res: Response) => {
+    try {
+      const review = await revertChangeReview(req.params.id as string);
+      if (review.status !== "reverted") {
+        res.status(409).json({ ok: false, review, error: review.error || "无法安全撤销" });
+        return;
+      }
+      res.json({ ok: true, review });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "撤销失败";
+      res.status(404).json({ error: msg });
+    }
+  });
+
   // --- Send message to owner via channel bot ---
 
   router.post("/send", async (req: Request, res: Response) => {
@@ -599,6 +691,7 @@ export function chatRouter(): Router {
           fileCount: filePaths.length,
         });
 
+        const changeSnapshot = await safeCreateChangeSnapshot();
         const result = await provider.runWithEvents({
           workdir: getWorkdir(),
           sandbox: getSandbox(),
@@ -611,7 +704,17 @@ export function chatRouter(): Router {
         });
 
         const providerSessionId = result.sessionId || session.sessionId;
-        db.addMessage(id, "assistant", result.text, buildAgentLoopMetadata(provider.type, agentEvents));
+        const changeReview = await safeCollectChangeReview(changeSnapshot);
+        db.addMessage(
+          id,
+          "assistant",
+          result.text,
+          buildAssistantMetadata({
+            provider: provider.type,
+            events: agentEvents,
+            changeReview,
+          }),
+        );
         db.updateSession({
           id,
           title: session.title,
@@ -624,6 +727,7 @@ export function chatRouter(): Router {
           content: result.text,
           title: session.title,
           sessionId: providerSessionId,
+          changeReview,
         });
 
         logger.info("web.chat.stream.success", {
@@ -719,6 +823,7 @@ export function chatRouter(): Router {
         fileCount: filePaths.length,
       });
 
+      const changeSnapshot = await safeCreateChangeSnapshot();
       const result = await provider.run({
         workdir: getWorkdir(),
         sandbox: getSandbox(),
@@ -730,7 +835,13 @@ export function chatRouter(): Router {
       });
 
       const providerSessionId = result.sessionId || session.sessionId;
-      db.addMessage(id, "assistant", result.text);
+      const changeReview = await safeCollectChangeReview(changeSnapshot);
+      db.addMessage(
+        id,
+        "assistant",
+        result.text,
+        buildAssistantMetadata({ changeReview }),
+      );
       db.updateSession({
         id,
         title: session.title,
@@ -749,6 +860,7 @@ export function chatRouter(): Router {
         role: "assistant",
         content: result.text,
         title: session.title,
+        changeReview,
       });
     } catch (error) {
       logger.error("web.chat.failed", {

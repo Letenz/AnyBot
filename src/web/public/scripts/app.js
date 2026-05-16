@@ -311,7 +311,7 @@
                 '</div>';
         }
 
-        function appendMessage(role, text, attachments) {
+        function appendMessage(role, text, attachments, changeReview) {
             clearEmpty();
             var row = document.createElement('div');
             row.className = 'message-row ' + role;
@@ -330,6 +330,13 @@
                     content.innerHTML = marked.parse(text);
                 } catch (e) {
                     content.textContent = text;
+                }
+                if (changeReview && window.ChangeReview) {
+                    var reviewCard = window.ChangeReview.render({
+                        review: changeReview,
+                        scrollBottom: scrollBottom,
+                    });
+                    if (reviewCard) content.appendChild(reviewCard);
                 }
 
                 bubble.appendChild(avatar);
@@ -625,10 +632,11 @@
                                 scrollBottom: scrollBottom,
                                 content: m.content,
                                 loop: meta.claudeAgentLoop,
+                                changeReview: meta.changeReview,
                             });
                             return;
                         }
-                        appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo);
+                        appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview);
                     });
                 }
 
@@ -727,7 +735,7 @@
                 }
 
                 var data = await res.json();
-                appendMessage('ai', data.content);
+                appendMessage('ai', data.content, null, data.changeReview);
 
                 await fetchSessions();
             } catch (e) {

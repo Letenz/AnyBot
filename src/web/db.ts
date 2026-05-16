@@ -8,7 +8,7 @@ export type ChatSession = {
   sessionId: string | null;
   source: string;
   chatId: string | null;
-  messages: Array<{ role: "user" | "assistant"; content: string; metadata?: string | null }>;
+  messages: Array<{ id: number; role: "user" | "assistant"; content: string; metadata?: string | null }>;
   createdAt: number;
   updatedAt: number;
 };
@@ -82,7 +82,7 @@ const stmts = {
   `),
 
   getMessages: db.prepare(`
-    SELECT role, content, metadata FROM messages
+    SELECT id, role, content, metadata FROM messages
     WHERE session_id = ? ORDER BY id ASC
   `),
 
@@ -137,6 +137,7 @@ export function getSession(id: string): ChatSession | null {
   if (!row) return null;
 
   const messages = stmts.getMessages.all(id) as Array<{
+    id: number;
     role: "user" | "assistant";
     content: string;
     metadata: string | null;
@@ -174,6 +175,7 @@ export function findSessionBySourceChat(
     | undefined;
   if (!row) return null;
   const messages = stmts.getMessages.all(row.id) as Array<{
+    id: number;
     role: "user" | "assistant";
     content: string;
     metadata: string | null;
@@ -199,8 +201,9 @@ export function deleteSession(id: string): void {
   stmts.deleteSession.run(id);
 }
 
-export function addMessage(sessionId: string, role: "user" | "assistant", content: string, metadata?: string | null): void {
-  stmts.insertMessage.run(sessionId, role, content, metadata || null);
+export function addMessage(sessionId: string, role: "user" | "assistant", content: string, metadata?: string | null): number {
+  const result = stmts.insertMessage.run(sessionId, role, content, metadata || null);
+  return Number(result.lastInsertRowid);
 }
 
 export function detachChatId(source: string, chatId: string): void {

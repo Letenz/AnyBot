@@ -1,0 +1,450 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
+
+const execFileAsync = promisify(execFile);
+
+export type ChangeReviewStatus = "pending" | "approved" | "reverted";
+
+export type PublicFileChange = {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  additions: number;
+  deletions: number;
+  diff: string;
+};
+
+export type PublicChangeReview = {
+  id: string;
+  status: ChangeReviewStatus;
+  fileCount: number;
+  totalAdditions: number;
+  totalDeletions: number;
+  files: PublicFileChange[];
+  error?: string;
+};
+
+type StoredFileChange = PublicFileChange & {
+  beforeContentBase64: string | null;
+  afterContentBase64: string | null;
+};
+
+type StoredChangeReview = Omit<PublicChangeReview, "files"> & {
+  workdir: string;
+  createdAt: number;
+  updatedAt: number;
+  files: StoredFileChange[];
+};
+
+type SnapshotFile = {
+  exists: boolean;
+  contentBase64: string | null;
+};
+
+export type ChangeSnapshot = {
+  workdir: string;
+  mode: "git" | "filesystem";
+  trackedAtStart: Set<string>;
+  changedAtStart: Map<string, SnapshotFile>;
+  filesAtStart: Map<string, SnapshotFile>;
+};
+
+const dataDir =
+  process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.join(process.cwd(), ".data");
+const reviewDir = path.join(dataDir, "change-reviews");
+const SNAPSHOT_SKIP_DIRS = new Set([".git", "node_modules", ".data", ".run", "tmp"]);
+const MAX_SNAPSHOT_FILE_BYTES = 10 * 1024 * 1024;
+
+async function ensureReviewDir(): Promise<void> {
+  await fs.promises.mkdir(reviewDir, { recursive: true });
+}
+
+async function runGit(
+  workdir: string,
+  args: string[],
+  opts: { allowFailure?: boolean; maxBuffer?: number } = {},
+): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd: workdir,
+      encoding: "utf8",
+      maxBuffer: opts.maxBuffer || 20 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (error) {
+    if (opts.allowFailure && typeof (error as { stdout?: unknown }).stdout === "string") {
+      return (error as { stdout: string }).stdout;
+    }
+    throw error;
+  }
+}
+
+async function runGitBuffer(
+  workdir: string,
+  args: string[],
+  opts: { maxBuffer?: number } = {},
+): Promise<Buffer> {
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: workdir,
+    encoding: "buffer",
+    maxBuffer: opts.maxBuffer || 50 * 1024 * 1024,
+  });
+  return stdout as Buffer;
+}
+
+function splitNul(value: string): string[] {
+  return value.split("\0").filter(Boolean);
+}
+
+function parsePorcelainPaths(output: string): string[] {
+  const entries = splitNul(output);
+  const paths = new Set<string>();
+
+  for (let i = 0; i < entries.length; i += 1) {
+    const entry = entries[i];
+    if (entry.length < 4) continue;
+    const status = entry.slice(0, 2);
+    const filePath = entry.slice(3);
+    if (!filePath) continue;
+    paths.add(filePath);
+
+    if ((status.includes("R") || status.includes("C")) && entries[i + 1]) {
+      paths.add(entries[i + 1]);
+      i += 1;
+    }
+  }
+
+  return Array.from(paths);
+}
+
+async function readFileSnapshot(workdir: string, relativePath: string): Promise<SnapshotFile> {
+  const filePath = path.resolve(workdir, relativePath);
+  if (!filePath.startsWith(path.resolve(workdir) + path.sep) && filePath !== path.resolve(workdir)) {
+    throw new Error(`文件路径越界: ${relativePath}`);
+  }
+
+  try {
+    const content = await fs.promises.readFile(filePath);
+    return { exists: true, contentBase64: content.toString("base64") };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { exists: false, contentBase64: null };
+    }
+    throw error;
+  }
+}
+
+async function walkWorkspaceFiles(workdir: string): Promise<string[]> {
+  const root = path.resolve(workdir);
+  const result: string[] = [];
+
+  async function walk(dir: string): Promise<void> {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && SNAPSHOT_SKIP_DIRS.has(entry.name)) continue;
+      if (SNAPSHOT_SKIP_DIRS.has(entry.name)) continue;
+
+      const absolutePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolutePath);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const stat = await fs.promises.stat(absolutePath).catch(() => null);
+      if (!stat || stat.size > MAX_SNAPSHOT_FILE_BYTES) continue;
+      result.push(path.relative(root, absolutePath));
+    }
+  }
+
+  await walk(root);
+  return result.sort();
+}
+
+async function createFilesystemSnapshot(workdir: string): Promise<ChangeSnapshot | null> {
+  const filesAtStart = new Map<string, SnapshotFile>();
+  for (const filePath of await walkWorkspaceFiles(workdir)) {
+    filesAtStart.set(filePath, await readFileSnapshot(workdir, filePath));
+  }
+  return {
+    workdir,
+    mode: "filesystem",
+    trackedAtStart: new Set(),
+    changedAtStart: new Map(),
+    filesAtStart,
+  };
+}
+
+function decodeBase64(value: string | null): Buffer {
+  return value ? Buffer.from(value, "base64") : Buffer.alloc(0);
+}
+
+function bufferEqualsBase64(buffer: Buffer | null, encoded: string | null): boolean {
+  if (buffer === null) return encoded === null;
+  if (encoded === null) return false;
+  return buffer.equals(Buffer.from(encoded, "base64"));
+}
+
+function isBinary(buffer: Buffer): boolean {
+  return buffer.includes(0);
+}
+
+async function writeTempFile(content: Buffer): Promise<string> {
+  const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "anybot-diff-"));
+  const filePath = path.join(dir, "content");
+  await fs.promises.writeFile(filePath, content);
+  return filePath;
+}
+
+async function diffBuffers(relativePath: string, before: Buffer, after: Buffer): Promise<string> {
+  if (isBinary(before) || isBinary(after)) {
+    return `diff --git a/${relativePath} b/${relativePath}\nBinary files differ`;
+  }
+
+  const beforePath = await writeTempFile(before);
+  const afterPath = await writeTempFile(after);
+  try {
+    const raw = await runGit(
+      process.cwd(),
+      ["diff", "--no-index", "--no-color", "--no-ext-diff", "--", beforePath, afterPath],
+      { allowFailure: true },
+    );
+    return raw
+      .replace(/^diff --git .*$/m, `diff --git a/${relativePath} b/${relativePath}`)
+      .replace(/^--- .*$/m, `--- a/${relativePath}`)
+      .replace(/^\+\+\+ .*$/m, `+++ b/${relativePath}`)
+      .trimEnd();
+  } finally {
+    await fs.promises.rm(path.dirname(beforePath), { recursive: true, force: true });
+    await fs.promises.rm(path.dirname(afterPath), { recursive: true, force: true });
+  }
+}
+
+function countDiffLines(diff: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
+    if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+  }
+  return { additions, deletions };
+}
+
+function getPublicReview(review: StoredChangeReview): PublicChangeReview {
+  return {
+    id: review.id,
+    status: review.status,
+    fileCount: review.fileCount,
+    totalAdditions: review.totalAdditions,
+    totalDeletions: review.totalDeletions,
+    files: review.files.map((file) => ({
+      path: file.path,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      diff: file.diff,
+    })),
+    error: review.error,
+  };
+}
+
+function reviewPath(id: string): string {
+  if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("变更审查 ID 无效");
+  return path.join(reviewDir, `${id}.json`);
+}
+
+async function saveReview(review: StoredChangeReview): Promise<void> {
+  await ensureReviewDir();
+  review.updatedAt = Date.now();
+  await fs.promises.writeFile(reviewPath(review.id), JSON.stringify(review, null, 2));
+}
+
+async function loadStoredReview(id: string): Promise<StoredChangeReview | null> {
+  try {
+    const raw = await fs.promises.readFile(reviewPath(id), "utf8");
+    return JSON.parse(raw) as StoredChangeReview;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export async function createChangeSnapshot(workdir: string): Promise<ChangeSnapshot | null> {
+  try {
+    const inside = (await runGit(workdir, ["rev-parse", "--is-inside-work-tree"])).trim();
+    if (inside !== "true") return createFilesystemSnapshot(workdir);
+
+    const trackedAtStart = new Set(splitNul(await runGit(workdir, ["ls-files", "-z"])));
+    const changedPaths = parsePorcelainPaths(
+      await runGit(workdir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+    );
+    const changedAtStart = new Map<string, SnapshotFile>();
+
+    for (const filePath of changedPaths) {
+      changedAtStart.set(filePath, await readFileSnapshot(workdir, filePath));
+    }
+
+    return {
+      workdir,
+      mode: "git",
+      trackedAtStart,
+      changedAtStart,
+      filesAtStart: new Map(),
+    };
+  } catch {
+    return createFilesystemSnapshot(workdir);
+  }
+}
+
+export async function collectChangeReview(
+  snapshot: ChangeSnapshot | null,
+): Promise<PublicChangeReview | null> {
+  if (!snapshot) return null;
+
+  const afterFiles =
+    snapshot.mode === "filesystem"
+      ? new Map(
+          await Promise.all(
+            (await walkWorkspaceFiles(snapshot.workdir)).map(async (filePath) => [
+              filePath,
+              await readFileSnapshot(snapshot.workdir, filePath),
+            ] as const),
+          ),
+        )
+      : null;
+  const afterPaths =
+    snapshot.mode === "git"
+      ? parsePorcelainPaths(
+          await runGit(snapshot.workdir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+        )
+      : Array.from(afterFiles?.keys() || []);
+  const candidates = new Set([
+    ...afterPaths,
+    ...snapshot.changedAtStart.keys(),
+    ...snapshot.filesAtStart.keys(),
+  ]);
+  const files: StoredFileChange[] = [];
+
+  for (const filePath of Array.from(candidates).sort()) {
+    const beforeSnapshot =
+      snapshot.filesAtStart.get(filePath) ||
+      snapshot.changedAtStart.get(filePath) ||
+      (snapshot.trackedAtStart.has(filePath)
+        ? {
+            exists: true,
+            contentBase64: (
+              await runGitBuffer(snapshot.workdir, ["show", `HEAD:${filePath}`])
+            ).toString("base64"),
+          }
+        : { exists: false, contentBase64: null });
+    const afterSnapshot =
+      afterFiles?.get(filePath) || (await readFileSnapshot(snapshot.workdir, filePath));
+
+    const beforeBuffer = beforeSnapshot.exists ? decodeBase64(beforeSnapshot.contentBase64) : null;
+    const afterBuffer = afterSnapshot.exists ? decodeBase64(afterSnapshot.contentBase64) : null;
+
+    if (bufferEqualsBase64(afterBuffer, beforeSnapshot.contentBase64)) continue;
+
+    const beforeForDiff = beforeBuffer || Buffer.alloc(0);
+    const afterForDiff = afterBuffer || Buffer.alloc(0);
+    const diff = await diffBuffers(filePath, beforeForDiff, afterForDiff);
+    const counts = countDiffLines(diff);
+
+    files.push({
+      path: filePath,
+      status: beforeSnapshot.exists ? (afterSnapshot.exists ? "modified" : "deleted") : "added",
+      additions: counts.additions,
+      deletions: counts.deletions,
+      diff,
+      beforeContentBase64: beforeSnapshot.exists ? beforeSnapshot.contentBase64 : null,
+      afterContentBase64: afterSnapshot.exists ? afterSnapshot.contentBase64 : null,
+    });
+  }
+
+  if (files.length === 0) return null;
+
+  const review: StoredChangeReview = {
+    id: randomUUID(),
+    workdir: snapshot.workdir,
+    status: "pending",
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    fileCount: files.length,
+    totalAdditions: files.reduce((sum, file) => sum + file.additions, 0),
+    totalDeletions: files.reduce((sum, file) => sum + file.deletions, 0),
+    files,
+  };
+
+  await saveReview(review);
+  return getPublicReview(review);
+}
+
+export async function getChangeReview(id: string): Promise<PublicChangeReview | null> {
+  const review = await loadStoredReview(id);
+  return review ? getPublicReview(review) : null;
+}
+
+export async function approveChangeReview(id: string): Promise<PublicChangeReview> {
+  const review = await loadStoredReview(id);
+  if (!review) throw new Error("变更审查不存在");
+  if (review.status === "pending") {
+    review.status = "approved";
+    delete review.error;
+    await saveReview(review);
+  }
+  return getPublicReview(review);
+}
+
+export async function revertChangeReview(id: string): Promise<PublicChangeReview> {
+  const review = await loadStoredReview(id);
+  if (!review) throw new Error("变更审查不存在");
+  if (review.status !== "pending") return getPublicReview(review);
+
+  const root = path.resolve(review.workdir);
+  for (const file of review.files) {
+    const absolutePath = path.resolve(root, file.path);
+    if (!absolutePath.startsWith(root + path.sep) && absolutePath !== root) {
+      review.error = `无法安全撤销：文件路径越界 ${file.path}`;
+      await saveReview(review);
+      return getPublicReview(review);
+    }
+
+    let current: Buffer | null = null;
+    try {
+      current = await fs.promises.readFile(absolutePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+
+    if (!bufferEqualsBase64(current, file.afterContentBase64)) {
+      review.error = `无法安全撤销：${file.path} 已被后续修改，请先手动处理该文件。`;
+      await saveReview(review);
+      return getPublicReview(review);
+    }
+  }
+
+  for (const file of review.files) {
+    const absolutePath = path.resolve(root, file.path);
+    if (file.beforeContentBase64 === null) {
+      await fs.promises.rm(absolutePath, { force: true });
+      continue;
+    }
+
+    await fs.promises.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.promises.writeFile(absolutePath, Buffer.from(file.beforeContentBase64, "base64"));
+  }
+
+  review.status = "reverted";
+  delete review.error;
+  await saveReview(review);
+  return getPublicReview(review);
+}

@@ -65,6 +65,7 @@
             webCount: 0,
             status: 'running',
             durationMs: Math.max(0, Date.now() - startedAt),
+            changeReview: opts.changeReview || null,
         };
 
         var row = document.createElement('div');
@@ -162,7 +163,19 @@
             finalEl.querySelectorAll('pre code').forEach(function (block) {
                 if (typeof hljs !== 'undefined') hljs.highlightElement(block);
             });
+            renderChangeReview();
             scrollBottom();
+        }
+
+        function renderChangeReview() {
+            if (!state.changeReview || !window.ChangeReview) return;
+            var existing = content.querySelector('.change-review-card');
+            if (existing) existing.remove();
+            var reviewCard = window.ChangeReview.render({
+                review: state.changeReview,
+                scrollBottom: scrollBottom,
+            });
+            if (reviewCard) content.appendChild(reviewCard);
         }
 
         function renderProcessTextSegment(segment) {
@@ -389,6 +402,7 @@
             if (event.type === 'result') {
                 removeFinalAnswerFromProcessText(event.content);
                 state.answerText = event.content || state.answerText;
+                state.changeReview = event.changeReview || state.changeReview;
                 renderAnswer();
                 state.status = 'completed';
                 updateProcessTitle();
@@ -455,6 +469,7 @@
         view.handleEvent({
             type: 'result',
             content: opts.content || '',
+            changeReview: opts.changeReview || null,
         });
         return view;
     }
