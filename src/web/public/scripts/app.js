@@ -45,6 +45,7 @@
         const addProjectBtn = document.getElementById('add-project-btn');
         const historyToggle = document.getElementById('history-toggle');
         const historyList = document.getElementById('history-list');
+        const addHistoryChatBtn = document.getElementById('add-history-chat-btn');
         const newChatBtn = document.getElementById('new-chat-btn');
 
         const modelSwitcher = document.getElementById('model-switcher');
@@ -211,10 +212,16 @@
         });
 
         sendBtn.addEventListener('click', sendMessage);
-        newChatBtn.addEventListener('click', createNewChat);
+        newChatBtn.addEventListener('click', function () {
+            createNewChat();
+        });
         projectToggle.addEventListener('click', toggleProjects);
         addProjectBtn.addEventListener('click', addProject);
         historyToggle.addEventListener('click', toggleHistory);
+        addHistoryChatBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            createNewChat(null, { force: true });
+        });
 
         // 附件按钮 - 点击触发文件选择
         attachBtn.addEventListener('click', function () {
@@ -908,6 +915,32 @@
             });
         }
 
+        function revealSessionContainer(projectId) {
+            if (projectId) {
+                isProjectsCollapsed = false;
+                localStorage.setItem('projectsCollapsed', 'false');
+                expandedProjectIds.add(projectId);
+                saveStoredSet('expandedProjectIds', expandedProjectIds);
+                updateProjectsCollapsedState();
+            } else {
+                isHistoryCollapsed = false;
+                localStorage.setItem('historyCollapsed', 'false');
+                updateHistoryCollapsedState();
+            }
+        }
+
+        function revealActiveSessionInSidebar() {
+            if (!currentSessionId) return;
+            var container = currentSessionProjectId ? projectList : historyList;
+            var items = container.querySelectorAll('[data-id]');
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].dataset.id === currentSessionId) {
+                    items[i].scrollIntoView({ block: 'nearest' });
+                    return;
+                }
+            }
+        }
+
         async function fetchSessions() {
             try {
                 var res = await fetch('/api/sessions');
@@ -948,11 +981,20 @@
             }
         }
 
-        async function createNewChat() {
+        async function createNewChat(projectId, options) {
+            options = options || {};
+            var targetProjectId = arguments.length > 0 ? projectId : activeProjectId;
+            if (!targetProjectId) targetProjectId = null;
             if (currentView !== 'chat') {
                 showChatView();
             }
-            if (currentSessionId && currentSessionProjectId === activeProjectId && !document.querySelector('#messages .message-row')) {
+            if (!options.force && currentSessionId && currentSessionProjectId === targetProjectId && !document.querySelector('#messages .message-row')) {
+                activeProjectId = targetProjectId;
+                revealSessionContainer(targetProjectId);
+                renderHistory();
+                renderProjects();
+                updateSidebarSelection();
+                revealActiveSessionInSidebar();
                 inputEl.focus();
                 return;
             }
@@ -960,12 +1002,14 @@
                 var res = await fetch('/api/sessions', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ projectId: activeProjectId }),
+                    body: JSON.stringify({ projectId: targetProjectId }),
                 });
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || '创建会话失败');
                 currentSessionId = data.id;
-                currentSessionProjectId = data.projectId || null;
+                currentSessionProjectId = data.projectId || targetProjectId || null;
+                activeProjectId = currentSessionProjectId;
+                revealSessionContainer(currentSessionProjectId);
                 showChatView();
                 updateContextUsage(null);
                 showEmptyState();
@@ -974,6 +1018,8 @@
                 sendBtn.disabled = true;
                 inputEl.focus();
                 await fetchSessions();
+                updateSidebarSelection();
+                revealActiveSessionInSidebar();
             } catch (e) {
                 showError(e.message || '创建会话失败');
             }

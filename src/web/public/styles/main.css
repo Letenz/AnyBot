@@ -333,13 +333,16 @@
             opacity: 1;
         }
 
-        #add-project-btn {
+        #add-project-btn,
+        #add-history-chat-btn {
             opacity: 0;
             pointer-events: none;
         }
 
         .sidebar-section-header:hover #add-project-btn,
-        #add-project-btn:focus-visible {
+        .sidebar-section-header:hover #add-history-chat-btn,
+        #add-project-btn:focus-visible,
+        #add-history-chat-btn:focus-visible {
             opacity: 1;
             pointer-events: auto;
         }
