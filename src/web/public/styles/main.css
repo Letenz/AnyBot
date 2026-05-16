@@ -299,11 +299,38 @@
             justify-content: center;
             transition: all 0.15s ease;
             flex-shrink: 0;
+            position: relative;
         }
 
         .sidebar-icon-btn:hover {
             background: var(--sidebar-hover);
             color: var(--text);
+        }
+
+        .sidebar-icon-btn[data-tooltip]::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: calc(100% + 8px);
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            white-space: nowrap;
+            padding: 6px 8px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: #e8e8f0;
+            color: #24242c;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 1;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+        }
+
+        .sidebar-icon-btn[data-tooltip]:hover::after,
+        .sidebar-icon-btn[data-tooltip]:focus-visible::after {
+            opacity: 1;
         }
 
         #add-project-btn {
