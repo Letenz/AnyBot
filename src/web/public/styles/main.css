@@ -940,18 +940,6 @@
             position: relative;
         }
 
-        #main::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background-image: linear-gradient(var(--border) 1px, transparent 1px),
-            linear-gradient(90deg, var(--border) 1px, transparent 1px);
-            background-size: 48px 48px;
-            opacity: 0.3;
-            pointer-events: none;
-            mask-image: radial-gradient(ellipse at center, black 0%, transparent 70%);
-        }
-
         #chat-view {
             flex: 1;
             display: flex;
