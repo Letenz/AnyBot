@@ -870,12 +870,20 @@
             projectList.innerHTML = '';
             projects.forEach(function (project) {
                 var isExpanded = expandedProjectIds.has(project.id);
-                var row = document.createElement('button');
+                var row = document.createElement('div');
                 row.className = 'project-item' + (activeProjectId === project.id ? ' active' : '');
-                row.type = 'button';
+                row.setAttribute('role', 'button');
+                row.tabIndex = 0;
                 row.dataset.id = project.id;
                 row.setAttribute('aria-expanded', String(isExpanded));
-                row.innerHTML = folderIcon(isExpanded) + '<span class="project-name"></span>';
+                row.innerHTML =
+                    folderIcon(isExpanded) +
+                    '<span class="project-name"></span>' +
+                    '<button class="project-create-chat" type="button" title="新对话" aria-label="在当前项目新建对话">' +
+                    '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">' +
+                    '<path d="M6.5 1.5v10M1.5 6.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+                    '</svg>' +
+                    '</button>';
                 row.querySelector('.project-name').textContent = project.name;
                 row.addEventListener('click', function () {
                     if (activeProjectId === project.id) {
@@ -889,6 +897,16 @@
                         return;
                     }
                     selectProject(project.id);
+                });
+                row.addEventListener('keydown', function (e) {
+                    if (e.target !== row) return;
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    row.click();
+                });
+                row.querySelector('.project-create-chat').addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    createNewChat(project.id, { force: true });
                 });
                 projectList.appendChild(row);
 
