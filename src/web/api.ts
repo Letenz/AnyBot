@@ -221,14 +221,30 @@ function createOrTouchProject(projectPath: string): db.Project {
   return project;
 }
 
-async function pickProjectFolder(): Promise<string> {
+function isFolderPickerCanceled(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; message?: unknown; stderr?: unknown };
+  const text = `${String(candidate.message || "")}\n${String(candidate.stderr || "")}`;
+  return text.includes("(-128)") || text.includes("用户已取消") || text.includes("User canceled") || text.includes("User cancelled");
+}
+
+async function pickProjectFolder(): Promise<string | null> {
   if (process.platform !== "darwin") {
     throw new Error("当前系统暂不支持从浏览器唤起本地文件夹选择器");
   }
-  const { stdout } = await execFile("osascript", [
-    "-e",
-    'POSIX path of (choose folder with prompt "选择项目文件夹")',
-  ]);
+  let stdout = "";
+  try {
+    const result = await execFile("osascript", [
+      "-e",
+      'POSIX path of (choose folder with prompt "选择项目文件夹")',
+    ]);
+    stdout = result.stdout;
+  } catch (error) {
+    if (isFolderPickerCanceled(error)) {
+      return null;
+    }
+    throw error;
+  }
   return stdout.trim();
 }
 
@@ -315,6 +331,10 @@ export function chatRouter(): Router {
   router.post("/projects/pick", async (_req: Request, res: Response) => {
     try {
       const projectPath = await pickProjectFolder();
+      if (!projectPath) {
+        res.json({ canceled: true });
+        return;
+      }
       const project = createOrTouchProject(projectPath);
       res.json(project);
     } catch (error) {

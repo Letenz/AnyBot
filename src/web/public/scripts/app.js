@@ -675,6 +675,7 @@
                 var res = await fetch('/api/projects/pick', { method: 'POST' });
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || '添加项目失败');
+                if (data.canceled) return;
                 activeProjectId = data.id;
                 expandedProjectIds.add(data.id);
                 saveStoredSet('expandedProjectIds', expandedProjectIds);
