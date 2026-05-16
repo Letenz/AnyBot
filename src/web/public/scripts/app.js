@@ -666,15 +666,7 @@
                     '已用 ' + formatTokenCount(usedTokens) + ' 标记，共 ' + formatTokenCount(maxTokens);
             }
             if (contextUsageProviderEl) {
-                var providerName = latestContextUsage.source === 'codex'
-                    ? 'Codex'
-                    : latestContextUsage.source === 'claude-code'
-                        ? 'Claude Code'
-                        : latestContextUsage.source;
-                contextUsageProviderEl.textContent =
-                    usedTokens > 0 && maxTokens > 0 && providerName
-                        ? providerName + ' 自动压缩其背景信息'
-                        : '';
+                contextUsageProviderEl.textContent = '';
             }
         }
 
