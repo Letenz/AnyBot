@@ -51,6 +51,11 @@
         const modelBadge = document.getElementById('model-badge');
         const modelDropdown = document.getElementById('model-dropdown');
         const currentModelNameEl = document.getElementById('current-model-name');
+        const contextUsageEl = document.getElementById('context-usage');
+        const contextUsageRingEl = document.getElementById('context-usage-ring');
+        const contextUsagePercentEl = document.getElementById('context-usage-percent');
+        const contextUsageTokensEl = document.getElementById('context-usage-tokens');
+        const contextUsageProviderEl = document.getElementById('context-usage-provider');
 
         const providerSwitcher = document.getElementById('provider-switcher');
         const providerBadge = document.getElementById('provider-badge');
@@ -65,6 +70,7 @@
         let projects = [];
         let modelConfig = null;
         let providerData = null;
+        let latestContextUsage = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
         let isBatchRenderingMessages = false;
@@ -448,6 +454,63 @@
             }
         }
 
+        function formatTokenCount(value) {
+            var n = Number(value || 0);
+            if (!Number.isFinite(n) || n <= 0) return '0';
+            if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '') + 'm';
+            if (n >= 1000) return Math.round(n / 1000) + 'k';
+            return String(Math.round(n));
+        }
+
+        function contextUsageColor(percent) {
+            if (percent >= 90) return '#ef4444';
+            if (percent >= 70) return '#f59e0b';
+            return '#9ca3af';
+        }
+
+        function updateContextUsage(usage) {
+            latestContextUsage = usage || {
+                usedTokens: 0,
+                maxTokens: 0,
+                usedPercentage: 0,
+                remainingPercentage: 100,
+                source: '',
+            };
+            if (!contextUsageEl || !contextUsageRingEl || !latestContextUsage) return;
+
+            var usedPercent = Math.max(0, Math.min(100, Number(latestContextUsage.usedPercentage || 0)));
+            var remainingPercent = Math.max(0, Math.round((100 - usedPercent) * 10) / 10);
+            var usedTokens = Number(latestContextUsage.usedTokens || 0);
+            var maxTokens = Number(latestContextUsage.maxTokens || 0);
+            var color = contextUsageColor(usedPercent);
+            var degrees = usedPercent * 3.6;
+
+            contextUsageEl.classList.toggle('has-data', usedTokens > 0 && maxTokens > 0);
+            contextUsageRingEl.style.background =
+                'radial-gradient(circle at center, var(--input-bg) 48%, transparent 50%), ' +
+                'conic-gradient(' + color + ' ' + degrees + 'deg, rgba(255, 255, 255, 0.11) ' + degrees + 'deg)';
+
+            if (contextUsagePercentEl) {
+                contextUsagePercentEl.textContent =
+                    Math.round(usedPercent) + '% 已用（剩余 ' + Math.round(remainingPercent) + '%）';
+            }
+            if (contextUsageTokensEl) {
+                contextUsageTokensEl.textContent =
+                    '已用 ' + formatTokenCount(usedTokens) + ' 标记，共 ' + formatTokenCount(maxTokens);
+            }
+            if (contextUsageProviderEl) {
+                var providerName = latestContextUsage.source === 'codex'
+                    ? 'Codex'
+                    : latestContextUsage.source === 'claude-code'
+                        ? 'Claude Code'
+                        : latestContextUsage.source;
+                contextUsageProviderEl.textContent =
+                    usedTokens > 0 && maxTokens > 0 && providerName
+                        ? providerName + ' 自动压缩其背景信息'
+                        : '';
+            }
+        }
+
         function groupSessionsByDate(list) {
             var now = new Date();
             var today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -745,6 +808,7 @@
                 currentSessionId = data.id;
                 currentSessionProjectId = data.projectId || null;
                 showChatView();
+                updateContextUsage(null);
                 showEmptyState();
                 inputEl.value = '';
                 inputEl.style.height = 'auto';
@@ -786,6 +850,7 @@
                     sessionId: sessionId,
                     view: agentView,
                     signal: controller.signal,
+                    onContextUsage: updateContextUsage,
                 });
 
                 if (activeStreamSessionId !== sessionId) return;
@@ -837,6 +902,7 @@
                 currentSessionId = id;
                 currentSessionProjectId = data.projectId || null;
                 activeProjectId = data.projectId || null;
+                updateContextUsage(null);
                 var didExpandProject = false;
                 if (activeProjectId && !expandedProjectIds.has(activeProjectId)) {
                     expandedProjectIds.add(activeProjectId);
@@ -867,6 +933,10 @@
                                     loop: meta.claudeAgentLoop,
                                     changeReview: meta.changeReview,
                                 });
+                                var usageEvents = Array.isArray(meta.claudeAgentLoop.events)
+                                    ? meta.claudeAgentLoop.events.filter(function (event) { return event && event.type === 'context_usage' && event.usage; })
+                                    : [];
+                                if (usageEvents.length > 0) updateContextUsage(usageEvents[usageEvents.length - 1].usage);
                                 return;
                             }
                             appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview);
@@ -895,6 +965,7 @@
                 if (currentSessionId === id) {
                     currentSessionId = null;
                     currentSessionProjectId = null;
+                    updateContextUsage(null);
                     showEmptyState();
                 }
                 await fetchSessions();
@@ -944,6 +1015,7 @@
                         sessionId: currentSessionId,
                         body: body,
                         view: agentView,
+                        onContextUsage: updateContextUsage,
                     });
                     if (!streamResult.fallback) {
                         await fetchSessions();
@@ -974,6 +1046,7 @@
                 }
 
                 var data = await res.json();
+                if (data.contextUsage) updateContextUsage(data.contextUsage);
                 appendMessage('ai', data.content, null, data.changeReview);
 
                 await fetchSessions();

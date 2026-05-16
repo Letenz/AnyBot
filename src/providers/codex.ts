@@ -10,6 +10,7 @@ import type {
   IProvider,
   ProviderCapabilities,
   ProviderModel,
+  ProviderContextUsage,
   RunOptions,
   RunResult,
 } from "./types.js";
@@ -51,6 +52,7 @@ export class ProviderParseError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_CODEX_CONTEXT_WINDOW = 258000;
 
 type StreamHandler = (event: ClaudeAgentStreamEvent) => void | Promise<void>;
 
@@ -164,6 +166,26 @@ function itemStatus(item: ThreadItem): "running" | "success" | "failed" {
     default:
       return "success";
   }
+}
+
+function extractContextUsage(usage: Usage | null): ProviderContextUsage | undefined {
+  if (!usage) return undefined;
+  const usedTokens = usage.input_tokens + usage.cached_input_tokens;
+  if (!usedTokens) return undefined;
+  const usedPercentage = Math.min(
+    100,
+    Math.round((usedTokens / DEFAULT_CODEX_CONTEXT_WINDOW) * 1000) / 10,
+  );
+  return {
+    usedTokens,
+    maxTokens: DEFAULT_CODEX_CONTEXT_WINDOW,
+    usedPercentage,
+    remainingPercentage: Math.max(0, Math.round((100 - usedPercentage) * 10) / 10),
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadInputTokens: usage.cached_input_tokens,
+    source: "codex",
+  };
 }
 
 function isToolItem(item: ThreadItem): boolean {
@@ -319,6 +341,8 @@ export class CodexProvider implements IProvider {
         throw new ProviderEmptyOutputError();
       }
 
+      const contextUsage = extractContextUsage(usage);
+
       logger.info("provider.exec.success", {
         provider: this.type,
         workdir,
@@ -340,6 +364,7 @@ export class CodexProvider implements IProvider {
       return {
         text: finalText,
         sessionId: providerSessionId,
+        contextUsage,
       };
     } catch (error) {
       clearTimeout(timer);

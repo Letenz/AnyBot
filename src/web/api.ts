@@ -45,6 +45,7 @@ import {
 } from "../shared.js";
 import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
 import type { IProvider } from "../providers/index.js";
+import type { ProviderContextUsage } from "../providers/types.js";
 
 const execFile = promisify(execFileCallback);
 
@@ -136,6 +137,7 @@ type AgentStreamEvent =
       title: string;
       sessionId: string | null;
       changeReview?: PublicChangeReview | null;
+      contextUsage?: ProviderContextUsage;
     }
   | { type: "error"; error: string }
   | { type: "done" };
@@ -878,6 +880,13 @@ export function chatRouter(): Router {
 
         const providerSessionId = result.sessionId || session.sessionId;
         const changeReview = await safeCollectChangeReview(changeSnapshot);
+        if (result.contextUsage) {
+          emit({
+            type: "context_usage",
+            usage: result.contextUsage,
+          });
+        }
+
         db.addMessage(
           id,
           "assistant",
@@ -901,6 +910,7 @@ export function chatRouter(): Router {
           title: session.title,
           sessionId: providerSessionId,
           changeReview,
+          contextUsage: result.contextUsage,
         });
 
         logger.info("web.chat.stream.success", {
@@ -1047,6 +1057,7 @@ export function chatRouter(): Router {
         content: result.text,
         title: session.title,
         changeReview,
+        contextUsage: result.contextUsage,
       });
     } catch (error) {
       logger.error("web.chat.failed", {

@@ -493,6 +493,11 @@
             if (chunk.done) break;
             buffer += decoder.decode(chunk.value, { stream: true });
             buffer = parseSseChunk(buffer, function (_eventName, data) {
+                if (data && data.type === 'context_usage' && data.usage && opts.onContextUsage) {
+                    opts.onContextUsage(data.usage);
+                } else if (data && data.type === 'result' && data.contextUsage && opts.onContextUsage) {
+                    opts.onContextUsage(data.contextUsage);
+                }
                 opts.view.handleEvent(data);
             });
         }

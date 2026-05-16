@@ -773,6 +773,94 @@
             gap: 6px;
         }
 
+        .context-usage {
+            position: relative;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex: 0 0 auto;
+            border-radius: 50%;
+            cursor: default;
+        }
+
+        .context-usage-ring {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background:
+                radial-gradient(circle at center, var(--input-bg) 48%, transparent 50%),
+                conic-gradient(var(--text-dim) 0deg, rgba(255, 255, 255, 0.08) 0deg);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+            opacity: 0.82;
+            transition: opacity 0.18s ease, transform 0.18s ease, filter 0.18s ease;
+        }
+
+        .context-usage.has-data .context-usage-ring {
+            opacity: 1;
+        }
+
+        .context-usage:hover .context-usage-ring,
+        .context-usage:focus-visible .context-usage-ring {
+            transform: scale(1.08);
+            filter: brightness(1.15);
+        }
+
+        .context-usage-tooltip {
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 12px);
+            width: 184px;
+            transform: translate(-50%, 4px);
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: rgba(22, 22, 28, 0.96);
+            box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.42);
+            color: var(--text);
+            font-size: 14px;
+            line-height: 1.55;
+            text-align: center;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+            z-index: 60;
+        }
+
+        .context-usage-tooltip::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            bottom: -6px;
+            width: 10px;
+            height: 10px;
+            transform: translateX(-50%) rotate(45deg);
+            background: rgba(22, 22, 28, 0.96);
+            border-right: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .context-usage:hover .context-usage-tooltip,
+        .context-usage:focus-visible .context-usage-tooltip {
+            opacity: 1;
+            visibility: visible;
+            transform: translate(-50%, 0);
+        }
+
+        .context-tooltip-title {
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        .context-tooltip-provider {
+            margin-top: 8px;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+        }
+
         .model-switcher {
             position: relative;
         }
