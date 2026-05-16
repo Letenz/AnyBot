@@ -226,18 +226,53 @@
         }
 
         .sidebar-label {
-            padding: 14px 16px 6px;
-            font-size: 10px;
+            width: calc(100% - 16px);
+            margin: 12px 8px 4px;
+            padding: 8px 8px;
+            border: 0;
+            border-radius: 8px;
+            background: transparent;
+            cursor: pointer;
+            font-family: 'Sora', sans-serif;
+            font-size: 13px;
             font-weight: 600;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-dim);
+            letter-spacing: 0;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.15s ease;
+            text-align: left;
+        }
+
+        .sidebar-label:hover {
+            background: var(--sidebar-hover);
+            color: var(--text);
+        }
+
+        .history-toggle-icon {
+            flex-shrink: 0;
+            transition: transform 0.16s ease;
+        }
+
+        #sidebar.history-collapsed .history-toggle-icon {
+            transform: rotate(-90deg);
         }
 
         .history-list {
             flex: 1;
             overflow-y: auto;
             padding: 4px 8px 12px;
+        }
+
+        #sidebar.history-collapsed .history-list {
+            overflow: hidden;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+
+        #sidebar.history-collapsed .history-list > * {
+            display: none;
         }
 
         .history-list::-webkit-scrollbar {

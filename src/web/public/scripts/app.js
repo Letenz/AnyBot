@@ -39,6 +39,8 @@
         const messagesEl = document.getElementById('messages');
         const inputEl = document.getElementById('chat-input');
         const sendBtn = document.getElementById('send-btn');
+        const sidebar = document.getElementById('sidebar');
+        const historyToggle = document.getElementById('history-toggle');
         const historyList = document.getElementById('history-list');
         const newChatBtn = document.getElementById('new-chat-btn');
 
@@ -59,6 +61,7 @@
         let providerData = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
+        let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -190,6 +193,7 @@
 
         sendBtn.addEventListener('click', sendMessage);
         newChatBtn.addEventListener('click', createNewChat);
+        historyToggle.addEventListener('click', toggleHistory);
 
         // 附件按钮 - 点击触发文件选择
         attachBtn.addEventListener('click', function () {
@@ -449,6 +453,18 @@
             });
 
             return groups;
+        }
+
+        function updateHistoryCollapsedState() {
+            sidebar.classList.toggle('history-collapsed', isHistoryCollapsed);
+            historyToggle.setAttribute('aria-expanded', String(!isHistoryCollapsed));
+            historyToggle.title = isHistoryCollapsed ? '展开对话列表' : '折叠对话列表';
+        }
+
+        function toggleHistory() {
+            isHistoryCollapsed = !isHistoryCollapsed;
+            localStorage.setItem('historyCollapsed', String(isHistoryCollapsed));
+            updateHistoryCollapsedState();
         }
 
         function renderHistory() {
@@ -1872,6 +1888,7 @@
         });
 
         async function init() {
+            updateHistoryCollapsedState();
             await Promise.all([fetchSessions(), fetchModelConfig(), fetchProviders(), fetchProxyConfig()]);
             if (sessions.length > 0) {
                 await loadSession(sessions[0].id);
