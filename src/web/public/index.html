@@ -85,30 +85,13 @@
     <div class="history-list" id="history-list"></div>
 
     <div class="sidebar-footer">
-        <div class="provider-switcher" id="provider-switcher">
-            <div class="provider-dropdown" id="provider-dropdown"></div>
-            <div class="provider-badge" id="provider-badge">
-                <div class="model-dot" style="background:#5cb85c"></div>
-                <span>提供商</span>
-                <span class="provider-name" id="current-provider-name">加载中…</span>
-                <svg class="provider-badge-arrow" viewBox="0 0 12 12" fill="none">
-                    <path d="M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
-                          stroke-linejoin="round"/>
-                </svg>
-            </div>
-        </div>
-        <div class="model-switcher" id="model-switcher">
-            <div class="model-dropdown" id="model-dropdown"></div>
-            <div class="model-badge" id="model-badge">
-                <div class="model-dot"></div>
-                <span>模型</span>
-                <span class="model-name" id="current-model-name">加载中…</span>
-                <svg class="model-badge-arrow" viewBox="0 0 12 12" fill="none">
-                    <path d="M3 5l3-3 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
-                          stroke-linejoin="round"/>
-                </svg>
-            </div>
-        </div>
+        <button id="settings-btn" class="sidebar-settings-btn" type="button">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M6.9 1.4h2.2l.35 1.52c.36.13.7.32 1.02.58l1.48-.48 1.1 1.9-1.12 1.04c.04.24.07.48.07.73s-.03.49-.07.73l1.12 1.04-1.1 1.9-1.48-.48c-.31.25-.65.44-1.02.58L9.1 12.6H6.9l-.35-1.52a4.02 4.02 0 0 1-1.02-.58l-1.48.48-1.1-1.9 1.12-1.04A4.3 4.3 0 0 1 4 7.31c0-.25.03-.49.07-.73L2.95 5.54l1.1-1.9 1.48.48c.31-.25.65-.44 1.02-.58L6.9 1.4Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
+                <circle cx="8" cy="7" r="1.9" stroke="currentColor" stroke-width="1.15"/>
+            </svg>
+            设置
+        </button>
     </div>
 </aside>
 
@@ -132,6 +115,16 @@
                     </svg>
                 </button>
                 <textarea id="chat-input" placeholder="发送消息... 可粘贴图片或拖拽文件" rows="1"></textarea>
+                <div class="model-switcher" id="model-switcher">
+                    <div class="model-dropdown" id="model-dropdown"></div>
+                    <button class="model-badge" id="model-badge" type="button" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="model-name" id="current-model-name">加载中…</span>
+                        <svg class="model-badge-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
+                                  stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
                 <div class="context-usage" id="context-usage" aria-label="上下文用量" tabindex="0">
                     <div class="context-usage-ring" id="context-usage-ring"></div>
                     <div class="context-usage-tooltip" id="context-usage-tooltip">
@@ -165,6 +158,32 @@
     <div id="skills-view" style="display:none;"></div>
     <div id="proxy-view" style="display:none;"></div>
 </main>
+
+<div id="settings-overlay" class="settings-overlay" aria-hidden="true">
+    <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="settings-panel-header">
+            <div>
+                <div class="settings-panel-title" id="settings-title">设置</div>
+                <div class="settings-panel-subtitle">调整当前对话的运行配置</div>
+            </div>
+            <button id="settings-close-btn" class="settings-icon-btn" type="button" aria-label="关闭设置">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+            </button>
+        </div>
+        <div class="settings-panel-body">
+            <label class="settings-field" for="settings-provider-select">
+                <span class="settings-field-label">提供商</span>
+                <select class="settings-select" id="settings-provider-select"></select>
+            </label>
+        </div>
+        <div class="settings-panel-actions">
+            <button id="settings-cancel-btn" class="settings-secondary-btn" type="button">取消</button>
+            <button id="settings-save-btn" class="settings-primary-btn" type="button">保存</button>
+        </div>
+    </section>
+</div>
 
 <script src="scripts/change-review.js"></script>
 <script src="scripts/claude-agent-loop.js"></script>

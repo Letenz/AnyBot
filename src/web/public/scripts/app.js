@@ -52,16 +52,17 @@
         const modelBadge = document.getElementById('model-badge');
         const modelDropdown = document.getElementById('model-dropdown');
         const currentModelNameEl = document.getElementById('current-model-name');
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const settingsCloseBtn = document.getElementById('settings-close-btn');
+        const settingsCancelBtn = document.getElementById('settings-cancel-btn');
+        const settingsSaveBtn = document.getElementById('settings-save-btn');
+        const settingsProviderSelect = document.getElementById('settings-provider-select');
         const contextUsageEl = document.getElementById('context-usage');
         const contextUsageRingEl = document.getElementById('context-usage-ring');
         const contextUsagePercentEl = document.getElementById('context-usage-percent');
         const contextUsageTokensEl = document.getElementById('context-usage-tokens');
         const contextUsageProviderEl = document.getElementById('context-usage-provider');
-
-        const providerSwitcher = document.getElementById('provider-switcher');
-        const providerBadge = document.getElementById('provider-badge');
-        const providerDropdown = document.getElementById('provider-dropdown');
-        const currentProviderNameEl = document.getElementById('current-provider-name');
 
         let currentSessionId = null;
         let currentSessionProjectId = null;
@@ -1308,6 +1309,7 @@
         async function switchModel(modelId) {
             if (!modelConfig || modelId === modelConfig.currentModel) {
                 modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
                 return;
             }
             try {
@@ -1327,6 +1329,7 @@
                 currentModelNameEl.textContent = modelConfig.currentModel;
                 renderModelDropdown();
                 modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
             } catch (e) {
                 showError('切换模型失败');
             }
@@ -1334,47 +1337,65 @@
 
         modelBadge.addEventListener('click', function (e) {
             e.stopPropagation();
-            providerSwitcher.classList.remove('open');
-            modelSwitcher.classList.toggle('open');
+            var isOpen = modelSwitcher.classList.toggle('open');
+            modelBadge.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         });
 
         async function fetchProviders() {
             try {
                 var res = await fetch('/api/providers');
                 providerData = await res.json();
-                currentProviderNameEl.textContent = providerData.current;
-                renderProviderDropdown();
+                renderProviderSelect();
             } catch (e) {
-                currentProviderNameEl.textContent = 'error';
                 console.error('Failed to fetch providers:', e);
             }
         }
 
-        function renderProviderDropdown() {
-            if (!providerData) return;
-            providerDropdown.innerHTML = '';
+        function renderProviderSelect() {
+            if (!providerData || !settingsProviderSelect) return;
+            settingsProviderSelect.innerHTML = '';
             providerData.providers.forEach(function (p) {
-                var opt = document.createElement('div');
-                opt.className = 'provider-option' + (p.type === providerData.current ? ' active' : '');
-                opt.innerHTML =
-                    '<div class="provider-option-name">' +
-                    (p.type === providerData.current
-                        ? '<svg class="model-option-check" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-                        : '<span style="width:14px;display:inline-block"></span>') +
-                    escapeHtml(p.displayName) +
-                    '</div>';
-                opt.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    switchProviderTo(p.type);
-                });
-                providerDropdown.appendChild(opt);
+                var opt = document.createElement('option');
+                opt.value = p.type;
+                opt.textContent = p.displayName;
+                settingsProviderSelect.appendChild(opt);
+            });
+            settingsProviderSelect.value = providerData.current;
+        }
+
+        function openSettingsPanel() {
+            if (providerData) renderProviderSelect();
+            settingsOverlay.classList.add('open');
+            settingsOverlay.setAttribute('aria-hidden', 'false');
+            settingsBtn.classList.add('active');
+            modelSwitcher.classList.remove('open');
+            modelBadge.setAttribute('aria-expanded', 'false');
+            requestAnimationFrame(function () {
+                settingsProviderSelect.focus();
             });
         }
 
-        async function switchProviderTo(providerType) {
+        function closeSettingsPanel() {
+            settingsOverlay.classList.remove('open');
+            settingsOverlay.setAttribute('aria-hidden', 'true');
+            settingsBtn.classList.remove('active');
+        }
+
+        async function saveSettings() {
+            if (!providerData || !settingsProviderSelect) return;
+            await switchProviderTo(settingsProviderSelect.value, { closeOnSuccess: true });
+        }
+
+        async function switchProviderTo(providerType, opts) {
             if (!providerData || providerType === providerData.current) {
-                providerSwitcher.classList.remove('open');
+                if (opts && opts.closeOnSuccess) closeSettingsPanel();
                 return;
+            }
+            var shouldClose = !!(opts && opts.closeOnSuccess);
+            var originalText = settingsSaveBtn.textContent;
+            if (shouldClose) {
+                settingsSaveBtn.disabled = true;
+                settingsSaveBtn.textContent = '保存中…';
             }
             try {
                 var res = await fetch('/api/providers/current', {
@@ -1389,28 +1410,45 @@
                 }
                 modelConfig = await res.json();
                 providerData.current = providerType;
-                currentProviderNameEl.textContent = providerType;
                 currentModelNameEl.textContent = modelConfig.currentModel;
-                renderProviderDropdown();
+                renderProviderSelect();
                 renderModelDropdown();
-                providerSwitcher.classList.remove('open');
+                if (shouldClose) closeSettingsPanel();
             } catch (e) {
                 showError('切换 Provider 失败');
+            } finally {
+                if (shouldClose) {
+                    settingsSaveBtn.disabled = false;
+                    settingsSaveBtn.textContent = originalText;
+                }
             }
         }
 
-        providerBadge.addEventListener('click', function (e) {
+        settingsBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            modelSwitcher.classList.remove('open');
-            providerSwitcher.classList.toggle('open');
+            openSettingsPanel();
+        });
+
+        settingsCloseBtn.addEventListener('click', closeSettingsPanel);
+        settingsCancelBtn.addEventListener('click', closeSettingsPanel);
+        settingsSaveBtn.addEventListener('click', saveSettings);
+
+        settingsOverlay.addEventListener('click', function (e) {
+            if (e.target === settingsOverlay) closeSettingsPanel();
         });
 
         document.addEventListener('click', function (e) {
             if (!modelSwitcher.contains(e.target)) {
                 modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
             }
-            if (!providerSwitcher.contains(e.target)) {
-                providerSwitcher.classList.remove('open');
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
+                if (settingsOverlay.classList.contains('open')) closeSettingsPanel();
             }
         });
 
