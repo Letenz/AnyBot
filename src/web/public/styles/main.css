@@ -944,9 +944,39 @@
             outline: none;
         }
 
+        .settings-combobox-option.disabled,
+        .settings-combobox-option:disabled {
+            color: var(--text-dim);
+            cursor: not-allowed;
+            opacity: 0.58;
+        }
+
+        .settings-combobox-option.disabled:hover,
+        .settings-combobox-option.disabled:focus-visible,
+        .settings-combobox-option:disabled:hover,
+        .settings-combobox-option:disabled:focus-visible {
+            background: transparent;
+            outline: none;
+        }
+
         .settings-combobox-option.active {
             background: var(--accent-dim);
             border-color: rgba(124, 111, 247, 0.22);
+        }
+
+        .settings-combobox-option-label {
+            min-width: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        .settings-combobox-option-status {
+            margin-left: auto;
+            flex-shrink: 0;
+            color: var(--text-dim);
+            font-size: 12px;
+            font-weight: 600;
         }
 
         .settings-combobox-check {

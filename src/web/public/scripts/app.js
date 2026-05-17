@@ -1419,26 +1419,32 @@
             settingsProviderSelect.innerHTML = '';
             if (settingsProviderMenu) settingsProviderMenu.innerHTML = '';
             providerData.providers.forEach(function (p) {
+                var isInstalled = isProviderInstalled(p);
                 var opt = document.createElement('option');
                 opt.value = p.type;
-                opt.textContent = p.displayName;
+                opt.textContent = p.displayName + (isInstalled ? '' : '（未安装）');
+                opt.disabled = !isInstalled;
                 settingsProviderSelect.appendChild(opt);
 
                 if (settingsProviderMenu) {
                     var item = document.createElement('button');
                     item.className = 'settings-combobox-option';
                     item.type = 'button';
+                    item.disabled = !isInstalled;
                     item.setAttribute('role', 'option');
+                    item.setAttribute('aria-disabled', isInstalled ? 'false' : 'true');
+                    if (!isInstalled) item.title = (p.bin || p.displayName) + ' 未安装';
                     item.dataset.providerType = p.type;
                     item.dataset.providerDisplayName = p.displayName;
-                    item.innerHTML =
-                        '<span class="settings-combobox-check-placeholder"></span>' +
-                        '<span>' + escapeHtml(p.displayName) + '</span>';
+                    item.dataset.providerInstalled = isInstalled ? 'true' : 'false';
+                    item.dataset.providerBin = p.bin || '';
+                    item.innerHTML = buildSettingsProviderOptionHtml(false, p.displayName, !isInstalled);
                     item.addEventListener('click', function (e) {
                         e.stopPropagation();
-                        setSettingsProviderValue(p.type);
-                        setSettingsProviderMenuOpen(false);
-                        settingsProviderTrigger.focus();
+                        if (setSettingsProviderValue(p.type)) {
+                            setSettingsProviderMenuOpen(false);
+                            settingsProviderTrigger.focus();
+                        }
                     });
                     item.addEventListener('keydown', handleSettingsProviderOptionKeydown);
                     settingsProviderMenu.appendChild(item);
@@ -1448,9 +1454,35 @@
             updateSettingsProviderDisplay();
         }
 
-        function getSettingsProviderOptions() {
+        function isProviderInstalled(provider) {
+            return !provider || provider.installed !== false;
+        }
+
+        function isSettingsProviderSelectable(providerType) {
+            if (!providerData) return false;
+            var provider = providerData.providers.find(function (p) {
+                return p.type === providerType;
+            });
+            return !!provider && isProviderInstalled(provider);
+        }
+
+        function buildSettingsProviderOptionHtml(isActive, displayName, isDisabled) {
+            return (
+                isActive
+                    ? '<svg class="settings-combobox-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                    : '<span class="settings-combobox-check-placeholder"></span>'
+            ) +
+                '<span class="settings-combobox-option-label">' + escapeHtml(displayName || '') + '</span>' +
+                (isDisabled ? '<span class="settings-combobox-option-status">未安装</span>' : '');
+        }
+
+        function getSettingsProviderOptions(includeDisabled) {
             if (!settingsProviderMenu) return [];
-            return Array.prototype.slice.call(settingsProviderMenu.querySelectorAll('.settings-combobox-option'));
+            var options = Array.prototype.slice.call(settingsProviderMenu.querySelectorAll('.settings-combobox-option'));
+            if (includeDisabled) return options;
+            return options.filter(function (item) {
+                return item.dataset.providerInstalled !== 'false' && !item.disabled;
+            });
         }
 
         function updateSettingsProviderDisplay() {
@@ -1459,24 +1491,33 @@
                 return p.type === settingsProviderSelect.value;
             });
             if (settingsProviderCurrent) {
-                settingsProviderCurrent.textContent = selected ? selected.displayName : '请选择提供商';
+                settingsProviderCurrent.textContent = selected
+                    ? selected.displayName + (isProviderInstalled(selected) ? '' : '（未安装）')
+                    : '请选择提供商';
             }
-            getSettingsProviderOptions().forEach(function (item) {
+            getSettingsProviderOptions(true).forEach(function (item) {
                 var isActive = item.dataset.providerType === settingsProviderSelect.value;
+                var isDisabled = item.dataset.providerInstalled === 'false';
                 item.classList.toggle('active', isActive);
+                item.classList.toggle('disabled', isDisabled);
                 item.setAttribute('aria-selected', isActive ? 'true' : 'false');
-                item.innerHTML =
-                    (isActive
-                        ? '<svg class="settings-combobox-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-                        : '<span class="settings-combobox-check-placeholder"></span>') +
-                    '<span>' + escapeHtml(item.dataset.providerDisplayName || '') + '</span>';
+                item.innerHTML = buildSettingsProviderOptionHtml(
+                    isActive,
+                    item.dataset.providerDisplayName || '',
+                    isDisabled,
+                );
             });
         }
 
         function setSettingsProviderValue(providerType) {
-            if (!settingsProviderSelect) return;
+            if (!settingsProviderSelect) return false;
+            if (!isSettingsProviderSelectable(providerType)) {
+                showError('该 Provider 未安装，无法选择');
+                return false;
+            }
             settingsProviderSelect.value = providerType;
             updateSettingsProviderDisplay();
+            return true;
         }
 
         function setSettingsProviderMenuOpen(isOpen) {
@@ -1484,7 +1525,7 @@
             settingsProviderCombobox.classList.toggle('open', isOpen);
             settingsProviderTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
             if (isOpen) {
-                var active = settingsProviderMenu && settingsProviderMenu.querySelector('.settings-combobox-option.active');
+                var active = settingsProviderMenu && settingsProviderMenu.querySelector('.settings-combobox-option.active:not(:disabled)');
                 requestAnimationFrame(function () {
                     (active || getSettingsProviderOptions()[0] || settingsProviderTrigger).focus();
                 });
@@ -1517,9 +1558,10 @@
                 if (last) last.focus();
             } else if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                setSettingsProviderValue(e.currentTarget.dataset.providerType);
-                setSettingsProviderMenuOpen(false);
-                settingsProviderTrigger.focus();
+                if (setSettingsProviderValue(e.currentTarget.dataset.providerType)) {
+                    setSettingsProviderMenuOpen(false);
+                    settingsProviderTrigger.focus();
+                }
             } else if (e.key === 'Escape') {
                 e.preventDefault();
                 setSettingsProviderMenuOpen(false);
@@ -1548,6 +1590,10 @@
 
         async function saveSettings() {
             if (!providerData || !settingsProviderSelect) return;
+            if (!isSettingsProviderSelectable(settingsProviderSelect.value)) {
+                showError('该 Provider 未安装，无法保存');
+                return;
+            }
             await switchProviderTo(settingsProviderSelect.value, { closeOnSuccess: true });
         }
 

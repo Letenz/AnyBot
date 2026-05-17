@@ -1,4 +1,7 @@
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
+import { spawnSync } from "node:child_process";
+import { accessSync, constants } from "node:fs";
+import path from "node:path";
 import type { IProvider } from "./types.js";
 import { CodexProvider } from "./codex.js";
 import { GeminiCliProvider } from "./gemini-cli.js";
@@ -7,6 +10,13 @@ import { QoderCliProvider } from "./qoder-cli.js";
 import { ClaudeCodeProvider } from "./claude-code.js";
 
 type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
+
+export interface ProviderInstallationStatus {
+  installed: boolean;
+  bin: string;
+  executablePath: string | null;
+  installHint: string;
+}
 
 function dropUndefined(config: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
@@ -83,6 +93,71 @@ export function normalizeProviderType(type: string): string {
 
 export function getRegisteredProviderTypes(): string[] {
   return Object.keys(providerFactories);
+}
+
+function getProviderBin(type: string, config: Record<string, unknown>): string {
+  switch (normalizeProviderType(type)) {
+    case "codex":
+      return (config.bin as string | undefined) || "codex";
+    case "gemini-cli":
+      return (config.bin as string | undefined) || "gemini";
+    case "cursor-cli":
+      return (config.bin as string | undefined) || "agent";
+    case "qoder-cli":
+      return (config.bin as string | undefined) || "qodercli";
+    case "claude-code":
+      return (config.pathToClaudeCodeExecutable as string | undefined) || "claude";
+    default:
+      return type;
+  }
+}
+
+function getProviderInstallHint(type: string): string {
+  switch (normalizeProviderType(type)) {
+    case "codex":
+      return "npm install -g @openai/codex";
+    case "gemini-cli":
+      return "详见 https://github.com/google-gemini/gemini-cli";
+    case "cursor-cli":
+      return "详见 https://docs.cursor.com/cli";
+    case "qoder-cli":
+      return "详见 https://docs.qoder.com";
+    case "claude-code":
+      return "安装并登录 Claude Code CLI；或设置 CLAUDE_CODE_BIN 指向 claude 可执行文件";
+    default:
+      return "";
+  }
+}
+
+function resolveExecutable(bin: string): string | null {
+  if (path.isAbsolute(bin) || bin.includes("/") || bin.includes("\\")) {
+    try {
+      accessSync(bin, constants.X_OK);
+      return bin;
+    } catch {
+      return null;
+    }
+  }
+
+  const result = spawnSync("which", [bin], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  if (result.status !== 0) return null;
+  return result.stdout.trim() || null;
+}
+
+export function getProviderInstallationStatus(type: string): ProviderInstallationStatus {
+  const normalizedType = normalizeProviderType(type);
+  const config = getProviderConfig(normalizedType);
+  const bin = getProviderBin(normalizedType, config);
+  const executablePath = resolveExecutable(bin);
+  return {
+    installed: executablePath !== null,
+    bin,
+    executablePath,
+    installHint: getProviderInstallHint(normalizedType),
+  };
 }
 
 export function createProvider(type: string, config?: Record<string, unknown>): IProvider {

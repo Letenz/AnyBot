@@ -6,6 +6,7 @@ import {
   getRegisteredProviderTypes,
   switchProvider,
   createProvider,
+  getProviderInstallationStatus,
 } from "../providers/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -182,6 +183,13 @@ export function setCurrentProvider(
     throw new Error(`不支持的 Provider: ${providerType}。可用: ${registered.join(", ")}`);
   }
 
+  const installation = getProviderInstallationStatus(providerType);
+  if (!installation.installed) {
+    throw new Error(
+      `${providerType} 未安装，无法切换。请先安装 ${installation.bin}：${installation.installHint}`,
+    );
+  }
+
   const config = readModelConfig();
   config.lastSelected[config.provider] = config.currentModel;
   config.provider = providerType;
@@ -198,13 +206,22 @@ export function getProviderTypes(): Array<{
   type: string;
   displayName: string;
   capabilities: Record<string, boolean>;
+  installed: boolean;
+  bin: string;
+  executablePath: string | null;
+  installHint: string;
 }> {
   return getRegisteredProviderTypes().map((type) => {
     const p = createProvider(type);
+    const installation = getProviderInstallationStatus(type);
     return {
       type: p.type,
       displayName: p.displayName,
       capabilities: { ...p.capabilities },
+      installed: installation.installed,
+      bin: installation.bin,
+      executablePath: installation.executablePath,
+      installHint: installation.installHint,
     };
   });
 }
