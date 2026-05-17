@@ -670,7 +670,7 @@
             }
             if (contextUsageTokensEl) {
                 contextUsageTokensEl.textContent =
-                    '已用 ' + formatTokenCount(usedTokens) + ' 标记，共 ' + formatTokenCount(maxTokens);
+                    '已用 ' + formatTokenCount(usedTokens) + ' token，共 ' + formatTokenCount(maxTokens);
             }
             if (contextUsageProviderEl) {
                 contextUsageProviderEl.textContent = '';
