@@ -110,6 +110,33 @@ export function getCurrentProviderType(): string {
   return readModelConfig().provider;
 }
 
+export function getModelForProvider(providerType: string): string {
+  return readModelConfigForProvider(providerType).currentModel;
+}
+
+export function readModelConfigForProvider(providerType: string): ModelConfig {
+  ensureConfig();
+  const raw = readFileSync(CONFIG_PATH, "utf-8");
+  const config = JSON.parse(raw) as ModelConfig;
+  if (!config.lastSelected) {
+    config.lastSelected = {};
+  }
+
+  const provider = createProvider(providerType);
+  const models = provider.listModels();
+  const model = selectCurrentModel(config, provider.type, models);
+  if (!config.lastSelected[provider.type]) {
+    config.lastSelected[provider.type] = model;
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  }
+  return {
+    ...config,
+    provider: provider.type,
+    currentModel: model,
+    models,
+  };
+}
+
 export function setCurrentModel(modelId: string): ModelConfig {
   const config = readModelConfig();
   const valid = config.models.some((m) => m.id === modelId);
@@ -120,6 +147,30 @@ export function setCurrentModel(modelId: string): ModelConfig {
   config.lastSelected[config.provider] = modelId;
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
   return config;
+}
+
+export function setModelForProvider(providerType: string, modelId: string): ModelConfig {
+  const provider = createProvider(providerType);
+  const models = provider.listModels();
+  const valid = models.some((m) => m.id === modelId);
+  if (!valid) {
+    throw new Error(`不支持的模型: ${modelId}`);
+  }
+
+  const config = readModelConfig();
+  config.lastSelected[provider.type] = modelId;
+  if (config.provider === provider.type) {
+    config.currentModel = modelId;
+    config.models = models;
+  }
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+
+  return {
+    ...config,
+    provider: provider.type,
+    currentModel: modelId,
+    models,
+  };
 }
 
 export function setCurrentProvider(

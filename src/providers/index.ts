@@ -8,6 +8,48 @@ import { ClaudeCodeProvider } from "./claude-code.js";
 
 type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
 
+function dropUndefined(config: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined),
+  );
+}
+
+export function getProviderConfig(type: string): Record<string, unknown> {
+  switch (normalizeProviderType(type)) {
+    case "codex":
+      return dropUndefined({ bin: process.env.CODEX_BIN });
+    case "gemini-cli":
+      return dropUndefined({
+        bin: process.env.GEMINI_CLI_BIN,
+        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || "yolo",
+      });
+    case "cursor-cli":
+      return dropUndefined({
+        bin: process.env.CURSOR_CLI_BIN,
+        workspace: process.env.CURSOR_CLI_WORKSPACE,
+        apiKey: process.env.CURSOR_API_KEY,
+      });
+    case "qoder-cli":
+      return dropUndefined({
+        bin: process.env.QODER_CLI_BIN,
+        maxTurns: process.env.QODER_CLI_MAX_TURNS
+          ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
+          : undefined,
+      });
+    case "claude-code":
+      return dropUndefined({
+        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_BIN,
+        defaultModel: process.env.CLAUDE_AGENT_MODEL,
+        maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
+          ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
+          : undefined,
+        permissionMode: process.env.CLAUDE_AGENT_PERMISSION_MODE,
+      });
+    default:
+      return {};
+  }
+}
+
 const providerFactories: Record<string, ProviderFactory> = {
   codex: (config) => new CodexProvider({ bin: config?.bin as string | undefined }),
   "claude-code": (config) =>
@@ -51,7 +93,11 @@ export function createProvider(type: string, config?: Record<string, unknown>): 
       `不支持的 Provider: ${type}。可用: ${Object.keys(providerFactories).join(", ")}`,
     );
   }
-  return factory(config);
+  const mergedConfig = {
+    ...getProviderConfig(normalizedType),
+    ...dropUndefined(config || {}),
+  };
+  return factory(mergedConfig);
 }
 
 let currentProvider: IProvider | null = null;

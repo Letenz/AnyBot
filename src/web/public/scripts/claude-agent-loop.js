@@ -526,12 +526,16 @@
         var reader = res.body.getReader();
         var decoder = new TextDecoder();
         var buffer = '';
+        var resultPayload = null;
 
         while (true) {
             var chunk = await reader.read();
             if (chunk.done) break;
             buffer += decoder.decode(chunk.value, { stream: true });
             buffer = parseSseChunk(buffer, function (_eventName, data) {
+                if (data && data.type === 'result') {
+                    resultPayload = data;
+                }
                 if (data && data.type === 'context_usage' && data.usage && opts.onContextUsage) {
                     opts.onContextUsage(data.usage);
                 } else if (data && data.type === 'result' && data.contextUsage && opts.onContextUsage) {
@@ -541,7 +545,7 @@
             });
         }
 
-        return { fallback: false, inactive: false };
+        return { fallback: false, inactive: false, result: resultPayload };
     }
 
     async function stream(opts) {
@@ -563,8 +567,8 @@
         return consumeStreamResponse(res, opts);
     }
 
-    function canStream(providerData) {
-        return !!providerData && (providerData.current === 'claude-code' || providerData.current === 'codex');
+    function canStream(providerType) {
+        return providerType === 'claude-code' || providerType === 'codex';
     }
 
     window.ClaudeAgentLoop = {

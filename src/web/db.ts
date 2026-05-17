@@ -6,6 +6,7 @@ export type ChatSession = {
   id: string;
   title: string;
   sessionId: string | null;
+  provider: string | null;
   source: string;
   chatId: string | null;
   projectId: string | null;
@@ -19,6 +20,7 @@ export type ChatMessage = ChatSession["messages"][number];
 export type SessionSummary = {
   id: string;
   title: string;
+  provider: string | null;
   source: string;
   projectId: string | null;
   messageCount: number;
@@ -56,6 +58,7 @@ db.exec(`
     id         TEXT PRIMARY KEY,
     title      TEXT NOT NULL DEFAULT '新对话',
     session_id TEXT,
+    provider   TEXT,
     source     TEXT NOT NULL DEFAULT 'web',
     chat_id    TEXT,
     project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
@@ -84,11 +87,15 @@ try {
   db.exec(`ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL`);
 } catch (_) {}
 try {
+  db.exec(`ALTER TABLE sessions ADD COLUMN provider TEXT`);
+} catch (_) {}
+try {
   db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`);
 } catch (_) {}
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_source_chat ON sessions(source, chat_id)`);;
 db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_provider ON sessions(provider)`);
 
 const stmts = {
   listProjects: db.prepare(`
@@ -117,7 +124,7 @@ const stmts = {
   `),
 
   listSessions: db.prepare(`
-    SELECT s.id, s.title, s.source, s.project_id AS projectId,
+    SELECT s.id, s.title, s.provider, s.source, s.project_id AS projectId,
            s.created_at AS createdAt, s.updated_at AS updatedAt,
            COUNT(m.id) AS messageCount
     FROM sessions s
@@ -127,7 +134,7 @@ const stmts = {
   `),
 
   getSession: db.prepare(`
-    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId, project_id AS projectId,
+    SELECT id, title, session_id AS sessionId, provider, source, chat_id AS chatId, project_id AS projectId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM sessions WHERE id = ?
   `),
@@ -162,12 +169,12 @@ const stmts = {
   `),
 
   insertSession: db.prepare(`
-    INSERT INTO sessions (id, title, session_id, source, chat_id, project_id, created_at, updated_at)
-    VALUES (@id, @title, @sessionId, @source, @chatId, @projectId, @createdAt, @updatedAt)
+    INSERT INTO sessions (id, title, session_id, provider, source, chat_id, project_id, created_at, updated_at)
+    VALUES (@id, @title, @sessionId, @provider, @source, @chatId, @projectId, @createdAt, @updatedAt)
   `),
 
   updateSession: db.prepare(`
-    UPDATE sessions SET title = @title, session_id = @sessionId, updated_at = @updatedAt
+    UPDATE sessions SET title = @title, session_id = @sessionId, provider = @provider, updated_at = @updatedAt
     WHERE id = @id
   `),
 
@@ -178,7 +185,7 @@ const stmts = {
   `),
 
   findBySourceChat: db.prepare(`
-    SELECT id, title, session_id AS sessionId, source, chat_id AS chatId, project_id AS projectId,
+    SELECT id, title, session_id AS sessionId, provider, source, chat_id AS chatId, project_id AS projectId,
            created_at AS createdAt, updated_at AS updatedAt
     FROM sessions WHERE source = ? AND chat_id = ?
     ORDER BY updated_at DESC LIMIT 1
@@ -229,6 +236,7 @@ export function getSession(id: string): ChatSession | null {
         id: string;
         title: string;
         sessionId: string | null;
+        provider: string | null;
         source: string;
         chatId: string | null;
         projectId: string | null;
@@ -254,6 +262,7 @@ export function getSessionMetadata(id: string): Omit<ChatSession, "messages"> | 
         id: string;
         title: string;
         sessionId: string | null;
+        provider: string | null;
         source: string;
         chatId: string | null;
         projectId: string | null;
@@ -294,6 +303,7 @@ export function createSession(session: ChatSession): void {
     id: session.id,
     title: session.title,
     sessionId: session.sessionId,
+    provider: session.provider || null,
     source: session.source || "web",
     chatId: session.chatId || null,
     projectId: session.projectId || null,
@@ -311,6 +321,7 @@ export function findSessionBySourceChat(
         id: string;
         title: string;
         sessionId: string | null;
+        provider: string | null;
         source: string;
         chatId: string | null;
         projectId: string | null;
@@ -332,12 +343,14 @@ export function updateSession(session: {
   id: string;
   title: string;
   sessionId: string | null;
+  provider: string | null;
   updatedAt: number;
 }): void {
   stmts.updateSession.run({
     id: session.id,
     title: session.title,
     sessionId: session.sessionId,
+    provider: session.provider,
     updatedAt: session.updatedAt,
   });
 }

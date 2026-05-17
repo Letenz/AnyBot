@@ -58,6 +58,10 @@
         const settingsCancelBtn = document.getElementById('settings-cancel-btn');
         const settingsSaveBtn = document.getElementById('settings-save-btn');
         const settingsProviderSelect = document.getElementById('settings-provider-select');
+        const settingsProviderCombobox = document.getElementById('settings-provider-combobox');
+        const settingsProviderTrigger = document.getElementById('settings-provider-trigger');
+        const settingsProviderCurrent = document.getElementById('settings-provider-current');
+        const settingsProviderMenu = document.getElementById('settings-provider-menu');
         const contextUsageEl = document.getElementById('context-usage');
         const contextUsageRingEl = document.getElementById('context-usage-ring');
         const contextUsagePercentEl = document.getElementById('context-usage-percent');
@@ -66,6 +70,7 @@
 
         let currentSessionId = null;
         let currentSessionProjectId = null;
+        let currentSessionProvider = null;
         let activeProjectId = null;
         let isTyping = false;
         let sessions = [];
@@ -1007,7 +1012,14 @@
             if (currentView !== 'chat') {
                 showChatView();
             }
-            if (!options.force && currentSessionId && currentSessionProjectId === targetProjectId && !document.querySelector('#messages .message-row')) {
+            var currentProviderType = providerData && providerData.current;
+            var canReuseEmptySession =
+                !options.force &&
+                currentSessionId &&
+                currentSessionProjectId === targetProjectId &&
+                (!currentProviderType || currentSessionProvider === currentProviderType) &&
+                !document.querySelector('#messages .message-row');
+            if (canReuseEmptySession) {
                 activeProjectId = targetProjectId;
                 revealSessionContainer(targetProjectId);
                 renderHistory();
@@ -1027,6 +1039,7 @@
                 if (!res.ok) throw new Error(data.error || '创建会话失败');
                 currentSessionId = data.id;
                 currentSessionProjectId = data.projectId || targetProjectId || null;
+                currentSessionProvider = data.provider || null;
                 activeProjectId = currentSessionProjectId;
                 revealSessionContainer(currentSessionProjectId);
                 showChatView();
@@ -1036,6 +1049,7 @@
                 inputEl.style.height = 'auto';
                 sendBtn.disabled = true;
                 inputEl.focus();
+                await fetchModelConfig(currentSessionProvider);
                 await fetchSessions();
                 updateSidebarSelection();
                 revealActiveSessionInSidebar();
@@ -1125,6 +1139,7 @@
                 var wasChatView = currentView === 'chat';
                 currentSessionId = id;
                 currentSessionProjectId = data.projectId || null;
+                currentSessionProvider = data.provider || null;
                 activeProjectId = data.projectId || null;
                 currentSessionHasMoreMessages = !!data.hasMoreMessages;
                 isLoadingOlderMessages = false;
@@ -1153,6 +1168,7 @@
                 }
                 renderOlderMessagesControl();
                 scrollBottom();
+                await fetchModelConfig(currentSessionProvider);
 
                 if (data.activeStream) {
                     resumeActiveStream(id, data.activeStream);
@@ -1172,6 +1188,7 @@
                 if (currentSessionId === id) {
                     currentSessionId = null;
                     currentSessionProjectId = null;
+                    currentSessionProvider = null;
                     updateContextUsage(null);
                     showEmptyState();
                 }
@@ -1212,7 +1229,7 @@
 
             var agentView = null;
             try {
-                if (window.ClaudeAgentLoop && window.ClaudeAgentLoop.canStream(providerData)) {
+                if (window.ClaudeAgentLoop && window.ClaudeAgentLoop.canStream(currentSessionProvider || (providerData && providerData.current))) {
                     removeTyping();
                     agentView = window.ClaudeAgentLoop.createMessage({
                         messagesEl: messagesEl,
@@ -1225,6 +1242,9 @@
                         onContextUsage: updateContextUsage,
                     });
                     if (!streamResult.fallback) {
+                        if (streamResult.result && streamResult.result.provider) {
+                            currentSessionProvider = streamResult.result.provider;
+                        }
                         await fetchSessions();
                         isTyping = false;
                         updateSendBtnState();
@@ -1253,6 +1273,7 @@
                 }
 
                 var data = await res.json();
+                if (data.provider) currentSessionProvider = data.provider;
                 if (data.contextUsage) updateContextUsage(data.contextUsage);
                 appendMessage('ai', data.content, null, data.changeReview);
 
@@ -1272,11 +1293,23 @@
             updateSendBtnState();
         }
 
-        async function fetchModelConfig() {
+        function getModelConfigProvider() {
+            return (modelConfig && modelConfig.provider) || currentSessionProvider || (providerData && providerData.current) || '';
+        }
+
+        function updateModelBadgeLabel() {
+            if (!modelConfig) return;
+            currentModelNameEl.textContent = modelConfig.currentModel;
+            modelBadge.title = currentModelNameEl.textContent;
+        }
+
+        async function fetchModelConfig(providerType) {
             try {
-                var res = await fetch('/api/model-config');
+                var targetProvider = providerType || currentSessionProvider || '';
+                var url = '/api/model-config' + (targetProvider ? '?provider=' + encodeURIComponent(targetProvider) : '');
+                var res = await fetch(url);
                 modelConfig = await res.json();
-                currentModelNameEl.textContent = modelConfig.currentModel;
+                updateModelBadgeLabel();
                 renderModelDropdown();
             } catch (e) {
                 currentModelNameEl.textContent = 'error';
@@ -1316,7 +1349,7 @@
                 var res = await fetch('/api/model-config', {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({modelId: modelId}),
+                    body: JSON.stringify({modelId: modelId, provider: getModelConfigProvider()}),
                 });
                 if (!res.ok) {
                     var err = await res.json().catch(function () {
@@ -1326,7 +1359,7 @@
                     return;
                 }
                 modelConfig = await res.json();
-                currentModelNameEl.textContent = modelConfig.currentModel;
+                updateModelBadgeLabel();
                 renderModelDropdown();
                 modelSwitcher.classList.remove('open');
                 modelBadge.setAttribute('aria-expanded', 'false');
@@ -1341,11 +1374,41 @@
             modelBadge.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         });
 
+        if (settingsProviderTrigger) {
+            settingsProviderTrigger.addEventListener('click', function (e) {
+                e.stopPropagation();
+                setSettingsProviderMenuOpen(!settingsProviderCombobox.classList.contains('open'));
+            });
+            settingsProviderTrigger.addEventListener('keydown', function (e) {
+                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSettingsProviderMenuOpen(true);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSettingsProviderMenuOpen(true);
+                    requestAnimationFrame(function () {
+                        var options = getSettingsProviderOptions();
+                        var last = options[options.length - 1];
+                        if (last) last.focus();
+                    });
+                } else if (e.key === 'Escape') {
+                    setSettingsProviderMenuOpen(false);
+                }
+            });
+        }
+
+        if (settingsProviderMenu) {
+            settingsProviderMenu.addEventListener('click', function (e) {
+                e.stopPropagation();
+            });
+        }
+
         async function fetchProviders() {
             try {
                 var res = await fetch('/api/providers');
                 providerData = await res.json();
                 renderProviderSelect();
+                updateModelBadgeLabel();
             } catch (e) {
                 console.error('Failed to fetch providers:', e);
             }
@@ -1354,13 +1417,114 @@
         function renderProviderSelect() {
             if (!providerData || !settingsProviderSelect) return;
             settingsProviderSelect.innerHTML = '';
+            if (settingsProviderMenu) settingsProviderMenu.innerHTML = '';
             providerData.providers.forEach(function (p) {
                 var opt = document.createElement('option');
                 opt.value = p.type;
                 opt.textContent = p.displayName;
                 settingsProviderSelect.appendChild(opt);
+
+                if (settingsProviderMenu) {
+                    var item = document.createElement('button');
+                    item.className = 'settings-combobox-option';
+                    item.type = 'button';
+                    item.setAttribute('role', 'option');
+                    item.dataset.providerType = p.type;
+                    item.dataset.providerDisplayName = p.displayName;
+                    item.innerHTML =
+                        '<span class="settings-combobox-check-placeholder"></span>' +
+                        '<span>' + escapeHtml(p.displayName) + '</span>';
+                    item.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        setSettingsProviderValue(p.type);
+                        setSettingsProviderMenuOpen(false);
+                        settingsProviderTrigger.focus();
+                    });
+                    item.addEventListener('keydown', handleSettingsProviderOptionKeydown);
+                    settingsProviderMenu.appendChild(item);
+                }
             });
             settingsProviderSelect.value = providerData.current;
+            updateSettingsProviderDisplay();
+        }
+
+        function getSettingsProviderOptions() {
+            if (!settingsProviderMenu) return [];
+            return Array.prototype.slice.call(settingsProviderMenu.querySelectorAll('.settings-combobox-option'));
+        }
+
+        function updateSettingsProviderDisplay() {
+            if (!providerData || !settingsProviderSelect) return;
+            var selected = providerData.providers.find(function (p) {
+                return p.type === settingsProviderSelect.value;
+            });
+            if (settingsProviderCurrent) {
+                settingsProviderCurrent.textContent = selected ? selected.displayName : '请选择提供商';
+            }
+            getSettingsProviderOptions().forEach(function (item) {
+                var isActive = item.dataset.providerType === settingsProviderSelect.value;
+                item.classList.toggle('active', isActive);
+                item.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                item.innerHTML =
+                    (isActive
+                        ? '<svg class="settings-combobox-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                        : '<span class="settings-combobox-check-placeholder"></span>') +
+                    '<span>' + escapeHtml(item.dataset.providerDisplayName || '') + '</span>';
+            });
+        }
+
+        function setSettingsProviderValue(providerType) {
+            if (!settingsProviderSelect) return;
+            settingsProviderSelect.value = providerType;
+            updateSettingsProviderDisplay();
+        }
+
+        function setSettingsProviderMenuOpen(isOpen) {
+            if (!settingsProviderCombobox || !settingsProviderTrigger) return;
+            settingsProviderCombobox.classList.toggle('open', isOpen);
+            settingsProviderTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            if (isOpen) {
+                var active = settingsProviderMenu && settingsProviderMenu.querySelector('.settings-combobox-option.active');
+                requestAnimationFrame(function () {
+                    (active || getSettingsProviderOptions()[0] || settingsProviderTrigger).focus();
+                });
+            }
+        }
+
+        function moveSettingsProviderFocus(delta) {
+            var options = getSettingsProviderOptions();
+            if (!options.length) return;
+            var currentIndex = options.indexOf(document.activeElement);
+            var nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + options.length) % options.length;
+            options[nextIndex].focus();
+        }
+
+        function handleSettingsProviderOptionKeydown(e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveSettingsProviderFocus(1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveSettingsProviderFocus(-1);
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                var first = getSettingsProviderOptions()[0];
+                if (first) first.focus();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                var options = getSettingsProviderOptions();
+                var last = options[options.length - 1];
+                if (last) last.focus();
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setSettingsProviderValue(e.currentTarget.dataset.providerType);
+                setSettingsProviderMenuOpen(false);
+                settingsProviderTrigger.focus();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setSettingsProviderMenuOpen(false);
+                settingsProviderTrigger.focus();
+            }
         }
 
         function openSettingsPanel() {
@@ -1371,11 +1535,12 @@
             modelSwitcher.classList.remove('open');
             modelBadge.setAttribute('aria-expanded', 'false');
             requestAnimationFrame(function () {
-                settingsProviderSelect.focus();
+                if (settingsProviderTrigger) settingsProviderTrigger.focus();
             });
         }
 
         function closeSettingsPanel() {
+            setSettingsProviderMenuOpen(false);
             settingsOverlay.classList.remove('open');
             settingsOverlay.setAttribute('aria-hidden', 'true');
             settingsBtn.classList.remove('active');
@@ -1408,9 +1573,14 @@
                     showError(err.error || '切换 Provider 失败');
                     return;
                 }
-                modelConfig = await res.json();
+                var switchedConfig = await res.json();
                 providerData.current = providerType;
-                currentModelNameEl.textContent = modelConfig.currentModel;
+                if (!currentSessionProvider || currentSessionProvider === providerType) {
+                    modelConfig = switchedConfig;
+                    updateModelBadgeLabel();
+                } else {
+                    await fetchModelConfig(currentSessionProvider);
+                }
                 renderProviderSelect();
                 renderModelDropdown();
                 if (shouldClose) closeSettingsPanel();
@@ -1442,10 +1612,18 @@
                 modelSwitcher.classList.remove('open');
                 modelBadge.setAttribute('aria-expanded', 'false');
             }
+            if (settingsProviderCombobox && !settingsProviderCombobox.contains(e.target)) {
+                setSettingsProviderMenuOpen(false);
+            }
         });
 
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
+                if (settingsProviderCombobox && settingsProviderCombobox.classList.contains('open')) {
+                    setSettingsProviderMenuOpen(false);
+                    settingsProviderTrigger.focus();
+                    return;
+                }
                 modelSwitcher.classList.remove('open');
                 modelBadge.setAttribute('aria-expanded', 'false');
                 if (settingsOverlay.classList.contains('open')) closeSettingsPanel();

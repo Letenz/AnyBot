@@ -7,6 +7,8 @@ import { createApp } from "./web/server.js";
 import {
   initProvider,
   getProvider,
+  getProviderConfig,
+  createProvider,
   normalizeProviderType,
   ProviderTimeoutError,
   ProviderProcessError,
@@ -20,6 +22,7 @@ import {
 } from "./logger.js";
 import {
   getCurrentModel,
+  getModelForProvider,
   readModelConfig,
   setCurrentProvider,
   setCurrentModel,
@@ -38,42 +41,6 @@ import {
 } from "./shared.js";
 
 const providerType = normalizeProviderType(process.env.PROVIDER || "codex");
-
-function getProviderConfig(type: string): Record<string, unknown> {
-  switch (type) {
-    case "codex":
-      return { bin: process.env.CODEX_BIN };
-    case "gemini-cli":
-      return {
-        bin: process.env.GEMINI_CLI_BIN,
-        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || "yolo",
-      };
-    case "cursor-cli":
-      return {
-        bin: process.env.CURSOR_CLI_BIN,
-        workspace: process.env.CURSOR_CLI_WORKSPACE,
-        apiKey: process.env.CURSOR_API_KEY,
-      };
-    case "qoder-cli":
-      return {
-        bin: process.env.QODER_CLI_BIN,
-        maxTurns: process.env.QODER_CLI_MAX_TURNS
-          ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
-          : undefined,
-      };
-    case "claude-code":
-      return {
-        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_BIN,
-        defaultModel: process.env.CLAUDE_AGENT_MODEL,
-        maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
-          ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
-          : undefined,
-        permissionMode: process.env.CLAUDE_AGENT_PERMISSION_MODE,
-      };
-    default:
-      return {};
-  }
-}
 
 const provider = initProvider(providerType, getProviderConfig(providerType));
 
@@ -168,6 +135,7 @@ function getOrCreateChannelSession(
     id: generateId(),
     title: "新对话",
     sessionId: null,
+    provider: getProvider().type,
     source,
     chatId,
     projectId: null,
@@ -179,6 +147,16 @@ function getOrCreateChannelSession(
   return session;
 }
 
+function getSessionProvider(session: db.ChatSession) {
+  if (!session.provider) {
+    session.provider = getProvider().type;
+  }
+  const currentProvider = getProvider();
+  return session.provider === currentProvider.type
+    ? currentProvider
+    : createProvider(session.provider, getProviderConfig(session.provider));
+}
+
 async function generateReply(
   chatId: string,
   userText: string,
@@ -186,13 +164,14 @@ async function generateReply(
   source: string = "unknown",
 ): Promise<string> {
   const sessionKey = getChatSessionKey(source, chatId);
-  const sessionId = sessionIdByChat.get(sessionKey);
+  const dbSession = getOrCreateChannelSession(source, chatId);
+  const provider = getSessionProvider(dbSession);
+  const sessionId = sessionIdByChat.get(sessionKey) || dbSession.sessionId;
   const sessionGeneration = getSessionGeneration(sessionKey);
   const prompt = sessionId
     ? buildResumePrompt(userText, source)
     : buildFirstTurnPrompt(userText, source);
 
-  const dbSession = getOrCreateChannelSession(source, chatId);
   db.addMessage(dbSession.id, "user", userText);
 
   if (dbSession.messages.length <= 1) {
@@ -202,7 +181,7 @@ async function generateReply(
   logger.info("reply.generate.start", {
     chatId,
     source,
-    provider: getProvider().type,
+    provider: provider.type,
     mode: sessionId ? "resume" : "new",
     sessionId: sessionId || null,
     dbSessionId: dbSession.id,
@@ -213,10 +192,10 @@ async function generateReply(
     ...(shouldLogPrompt ? { prompt: rawLogString(prompt) } : {}),
   });
 
-  const result = await getProvider().run({
+  const result = await provider.run({
     workdir: getWorkdir(),
     sandbox: getSandbox(),
-    model: getCurrentModel(),
+    model: getModelForProvider(provider.type),
     prompt,
     imagePaths,
     sessionId: sessionId || undefined,
@@ -227,18 +206,19 @@ async function generateReply(
     sessionIdByChat.set(sessionKey, result.sessionId);
   }
 
-  db.addMessage(dbSession.id, "assistant", result.text);
+  db.addMessage(dbSession.id, "assistant", result.text, JSON.stringify({ provider: provider.type }));
   db.updateSession({
     id: dbSession.id,
     title: dbSession.title,
     sessionId: result.sessionId || dbSession.sessionId,
+    provider: dbSession.provider,
     updatedAt: Date.now(),
   });
 
   logger.info("reply.generate.success", {
     chatId,
     source,
-    provider: getProvider().type,
+    provider: provider.type,
     sessionId: result.sessionId,
     dbSessionId: dbSession.id,
     replyChars: result.text.length,

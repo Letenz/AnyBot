@@ -6,13 +6,15 @@ import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { Request, Response } from "express";
-import { getProvider, getRegisteredProviderTypes } from "../providers/index.js";
+import { createProvider, getProvider, getRegisteredProviderTypes } from "../providers/index.js";
 import { logger } from "../logger.js";
 import * as db from "./db.js";
 import {
   readModelConfig,
-  getCurrentModel,
+  readModelConfigForProvider,
+  getModelForProvider,
   setCurrentModel,
+  setModelForProvider,
   setCurrentProvider,
   getProviderTypes,
 } from "./model-config.js";
@@ -72,6 +74,19 @@ function isStreamingProvider(
   return typeof provider.runWithEvents === "function";
 }
 
+function getSessionProvider(session: Pick<db.ChatSession, "provider">): IProvider {
+  const currentProvider = getProvider();
+  const providerType = session.provider || currentProvider.type;
+  if (providerType === currentProvider.type) return currentProvider;
+  return createProvider(providerType);
+}
+
+function bindSessionProvider(session: Pick<db.ChatSession, "provider">): string {
+  if (session.provider) return session.provider;
+  session.provider = getProvider().type;
+  return session.provider;
+}
+
 function truncateForHistory(value: string | undefined, max = MAX_PERSISTED_EVENT_TEXT): string | undefined {
   if (!value) return value;
   if (value.length <= max) return value;
@@ -125,6 +140,9 @@ function buildAssistantMetadata(opts: {
   changeReview?: PublicChangeReview | null;
 }): string | null {
   const metadata: Record<string, unknown> = {};
+  if (opts.provider) {
+    metadata.provider = opts.provider;
+  }
   if (opts.provider && opts.events) {
     metadata.claudeAgentLoop = {
       version: 1,
@@ -240,6 +258,7 @@ type AgentStreamEvent =
       content: string;
       title: string;
       sessionId: string | null;
+      provider?: string | null;
       changeReview?: PublicChangeReview | null;
       contextUsage?: ProviderContextUsage;
     }
@@ -483,6 +502,7 @@ export function chatRouter(): Router {
       id: generateId(),
       title: "新对话",
       sessionId: null,
+      provider: getProvider().type,
       source: "web",
       chatId: null,
       projectId: projectId || null,
@@ -491,7 +511,7 @@ export function chatRouter(): Router {
       updatedAt: Date.now(),
     };
     db.createSession(session);
-    res.json({ id: session.id, title: session.title });
+    res.json({ id: session.id, title: session.title, projectId: session.projectId, provider: session.provider });
   });
 
   router.get("/sessions/:id", async (req: Request, res: Response) => {
@@ -505,6 +525,7 @@ export function chatRouter(): Router {
     res.json({
       id: session.id,
       title: session.title,
+      provider: session.provider,
       projectId: session.projectId,
       messages: await prepareMessagesForClient(page.messages),
       hasMoreMessages: page.hasMore,
@@ -556,23 +577,24 @@ export function chatRouter(): Router {
 
   // --- Model & Provider config ---
 
-  router.get("/model-config", (_req: Request, res: Response) => {
+  router.get("/model-config", (req: Request, res: Response) => {
     try {
-      res.json(readModelConfig());
+      const provider = typeof req.query.provider === "string" ? req.query.provider : "";
+      res.json(provider ? readModelConfigForProvider(provider) : readModelConfig());
     } catch (error) {
       res.status(500).json({ error: "读取模型配置失败" });
     }
   });
 
   router.put("/model-config", (req: Request, res: Response) => {
-    const { modelId } = req.body as { modelId?: string };
+    const { modelId, provider } = req.body as { modelId?: string; provider?: string };
     if (!modelId) {
       res.status(400).json({ error: "缺少 modelId" });
       return;
     }
     try {
-      const config = setCurrentModel(modelId);
-      logger.info("model.switched", { modelId });
+      const config = provider ? setModelForProvider(provider, modelId) : setCurrentModel(modelId);
+      logger.info("model.switched", { modelId, provider: provider || config.provider });
       res.json(config);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "切换模型失败";
@@ -909,8 +931,7 @@ export function chatRouter(): Router {
       return;
     }
 
-    const provider = getProvider();
-    if (session.source !== "web" || !isStreamingProvider(provider)) {
+    if (session.source !== "web") {
       res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
       return;
     }
@@ -921,6 +942,13 @@ export function chatRouter(): Router {
     };
     if (!content?.trim() && (!attachments || attachments.length === 0)) {
       res.status(400).json({ error: "消息不能为空" });
+      return;
+    }
+
+    bindSessionProvider(session);
+    const provider = getSessionProvider(session);
+    if (!isStreamingProvider(provider)) {
+      res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
       return;
     }
 
@@ -966,6 +994,7 @@ export function chatRouter(): Router {
       id,
       title: session.title,
       sessionId: session.sessionId,
+      provider: session.provider,
       updatedAt: Date.now(),
     });
 
@@ -1010,7 +1039,7 @@ export function chatRouter(): Router {
         const result = await provider.runWithEvents({
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
-          model: getCurrentModel(),
+          model: getModelForProvider(provider.type),
           prompt,
           imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
           sessionId: session.sessionId || undefined,
@@ -1041,6 +1070,7 @@ export function chatRouter(): Router {
           id,
           title: session.title,
           sessionId: providerSessionId,
+          provider: session.provider,
           updatedAt: Date.now(),
         });
 
@@ -1049,6 +1079,7 @@ export function chatRouter(): Router {
           content: result.text,
           title: session.title,
           sessionId: providerSessionId,
+          provider: provider.type,
           changeReview,
           contextUsage: result.contextUsage,
         });
@@ -1139,6 +1170,8 @@ export function chatRouter(): Router {
       session.title = generateTitle(content?.trim() || "文件分析");
     }
 
+    bindSessionProvider(session);
+
     const prompt = session.sessionId
       ? buildResumePrompt(userText)
       : buildFirstTurnPrompt(userText, "web", {
@@ -1148,7 +1181,7 @@ export function chatRouter(): Router {
         });
 
     try {
-      const provider = getProvider();
+      const provider = getSessionProvider(session);
       logger.info("web.chat.start", {
         sessionId: session.id,
         providerSessionId: session.sessionId,
@@ -1163,7 +1196,7 @@ export function chatRouter(): Router {
       const result = await provider.run({
         workdir: sessionWorkdir,
         sandbox: getSandbox(),
-        model: getCurrentModel(),
+        model: getModelForProvider(provider.type),
         prompt,
         imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
         sessionId: session.sessionId || undefined,
@@ -1176,12 +1209,13 @@ export function chatRouter(): Router {
         id,
         "assistant",
         result.text,
-        buildAssistantMetadata({ changeReview }),
+        buildAssistantMetadata({ provider: provider.type, changeReview }),
       );
       db.updateSession({
         id,
         title: session.title,
         sessionId: providerSessionId,
+        provider: session.provider,
         updatedAt: Date.now(),
       });
 
@@ -1196,6 +1230,7 @@ export function chatRouter(): Router {
         role: "assistant",
         content: result.text,
         title: session.title,
+        provider: provider.type,
         changeReview,
         contextUsage: result.contextUsage,
       });
