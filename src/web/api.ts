@@ -47,25 +47,27 @@ import {
 } from "../shared.js";
 import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
 import type { IProvider } from "../providers/index.js";
-import type { ProviderContextUsage } from "../providers/types.js";
+import {
+  attachAgentStreamClient,
+  buildAssistantMetadata,
+  compactAgentEvents,
+  createActiveAgentStream,
+  emitAgentStream,
+  finishAgentStream,
+  getActiveAgentStreamInfo,
+  hasActiveAgentStream,
+  type AgentStreamEvent,
+} from "./agent-stream.js";
 
 const execFile = promisify(execFileCallback);
 const DEFAULT_SESSION_MESSAGE_LIMIT = 40;
 const MESSAGE_PREVIEW_CHARS = 20000;
-const MAX_PERSISTED_AGENT_EVENTS = 240;
-const MAX_PERSISTED_EVENT_TEXT = 2000;
-const MAX_PERSISTED_DIFF_TEXT = 4000;
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
 
 function isImageFile(filePath: string): boolean {
   return IMAGE_EXTS.has(path.extname(filePath).toLowerCase());
-}
-
-function writeSse(res: Response, event: string, data: unknown): void {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 function isStreamingProvider(
@@ -85,75 +87,6 @@ function bindSessionProvider(session: Pick<db.ChatSession, "provider">): string 
   if (session.provider) return session.provider;
   session.provider = getProvider().type;
   return session.provider;
-}
-
-function truncateForHistory(value: string | undefined, max = MAX_PERSISTED_EVENT_TEXT): string | undefined {
-  if (!value) return value;
-  if (value.length <= max) return value;
-  return `${value.slice(0, max)}\n...[已截断 ${value.length - max} 字符]`;
-}
-
-function compactAgentEvent(event: ClaudeAgentStreamEvent): ClaudeAgentStreamEvent | null {
-  if (event.type === "answer_delta" || event.type === "tool_progress") return null;
-  if (event.type === "tool_start") {
-    return {
-      ...event,
-      tool: {
-        ...event.tool,
-        input: truncateForHistory(event.tool.input),
-      },
-    };
-  }
-  if (event.type === "tool_end") {
-    return {
-      ...event,
-      output: event.output
-        ? {
-            stdout: truncateForHistory(event.output.stdout),
-            stderr: truncateForHistory(event.output.stderr),
-            text: truncateForHistory(event.output.text),
-          }
-        : undefined,
-      error: truncateForHistory(event.error),
-      diffs: event.diffs?.map((diff) => ({
-        ...diff,
-        diff: truncateForHistory(diff.diff, MAX_PERSISTED_DIFF_TEXT) || "",
-      })),
-    };
-  }
-  if (event.type === "file_change") {
-    return { ...event, diff: undefined };
-  }
-  return event;
-}
-
-function compactAgentEvents(events: ClaudeAgentStreamEvent[]): ClaudeAgentStreamEvent[] {
-  return events
-    .map(compactAgentEvent)
-    .filter((event): event is ClaudeAgentStreamEvent => !!event)
-    .slice(-MAX_PERSISTED_AGENT_EVENTS);
-}
-
-function buildAssistantMetadata(opts: {
-  provider?: string;
-  events?: ClaudeAgentStreamEvent[];
-  changeReview?: PublicChangeReview | null;
-}): string | null {
-  const metadata: Record<string, unknown> = {};
-  if (opts.provider) {
-    metadata.provider = opts.provider;
-  }
-  if (opts.provider && opts.events) {
-    metadata.claudeAgentLoop = {
-      version: 1,
-      provider: opts.provider,
-      events: compactAgentEvents(opts.events),
-    };
-  }
-  if (opts.changeReview) {
-    metadata.changeReview = opts.changeReview;
-  }
-  return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
 }
 
 function readMessagePageQuery(req: Request): { beforeId: number | null; limit: number } {
@@ -249,70 +182,6 @@ async function safeCollectChangeReview(
     logger.warn("change_review.collect_failed", { error });
     return null;
   }
-}
-
-type AgentStreamEvent =
-  | ClaudeAgentStreamEvent
-  | {
-      type: "result";
-      content: string;
-      title: string;
-      sessionId: string | null;
-      provider?: string | null;
-      changeReview?: PublicChangeReview | null;
-      contextUsage?: ProviderContextUsage;
-    }
-  | { type: "error"; error: string }
-  | { type: "done" };
-
-type ActiveAgentStream = {
-  events: AgentStreamEvent[];
-  clients: Set<Response>;
-  startedAt: number;
-  done: boolean;
-};
-
-const activeAgentStreams = new Map<string, ActiveAgentStream>();
-
-function emitAgentStream(active: ActiveAgentStream, event: AgentStreamEvent): void {
-  active.events.push(event);
-  for (const client of active.clients) {
-    if (client.writableEnded) continue;
-    writeSse(client, event.type, event);
-  }
-}
-
-function attachAgentStreamClient(res: Response, active: ActiveAgentStream): void {
-  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
-
-  active.clients.add(res);
-  res.on("close", () => {
-    active.clients.delete(res);
-  });
-
-  for (const event of active.events) {
-    if (res.writableEnded) break;
-    writeSse(res, event.type, event);
-  }
-
-  if (active.done && !res.writableEnded) {
-    res.end();
-  }
-}
-
-function finishAgentStream(sessionId: string, active: ActiveAgentStream): void {
-  if (!active.done) {
-    active.done = true;
-    emitAgentStream(active, { type: "done" });
-  }
-  for (const client of active.clients) {
-    if (!client.writableEnded) client.end();
-  }
-  active.clients.clear();
-  activeAgentStreams.delete(sessionId);
 }
 
 function normalizeProjectPath(inputPath: string): string {
@@ -529,9 +398,7 @@ export function chatRouter(): Router {
       projectId: session.projectId,
       messages: await prepareMessagesForClient(page.messages),
       hasMoreMessages: page.hasMore,
-      activeStream: activeAgentStreams.has(session.id)
-        ? { startedAt: activeAgentStreams.get(session.id)?.startedAt }
-        : null,
+      activeStream: getActiveAgentStreamInfo(session.id),
     });
   });
 
@@ -909,13 +776,10 @@ export function chatRouter(): Router {
       return;
     }
 
-    const active = activeAgentStreams.get(id);
-    if (!active) {
+    if (!attachAgentStreamClient(id, res)) {
       res.status(404).json({ error: "当前会话没有正在进行的流式响应" });
       return;
     }
-
-    attachAgentStreamClient(res, active);
   });
 
   router.post("/sessions/:id/messages/stream", async (req: Request, res: Response) => {
@@ -926,13 +790,8 @@ export function chatRouter(): Router {
       return;
     }
 
-    if (activeAgentStreams.has(id)) {
+    if (hasActiveAgentStream(id)) {
       res.status(423).json({ error: "当前会话正在处理中，请稍后再发送新消息" });
-      return;
-    }
-
-    if (session.source !== "web") {
-      res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
       return;
     }
 
@@ -999,21 +858,15 @@ export function chatRouter(): Router {
     });
 
     const prompt = session.sessionId
-      ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText, "web", {
+      ? buildResumePrompt(userText, session.source || "web")
+      : buildFirstTurnPrompt(userText, session.source || "web", {
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
           includeWorkspaceMemory: !session.projectId,
         });
 
-    const active: ActiveAgentStream = {
-      events: [],
-      clients: new Set(),
-      startedAt: Date.now(),
-      done: false,
-    };
-    activeAgentStreams.set(id, active);
-    attachAgentStreamClient(res, active);
+    const active = createActiveAgentStream(id);
+    attachAgentStreamClient(id, res);
 
     const agentEvents: ClaudeAgentStreamEvent[] = [];
     const emit = (event: AgentStreamEvent) => {
@@ -1113,7 +966,7 @@ export function chatRouter(): Router {
       return;
     }
 
-    if (activeAgentStreams.has(id)) {
+    if (hasActiveAgentStream(id)) {
       res.status(423).json({ error: "当前会话正在处理中，请稍后再发送新消息" });
       return;
     }
@@ -1173,8 +1026,8 @@ export function chatRouter(): Router {
     bindSessionProvider(session);
 
     const prompt = session.sessionId
-      ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText, "web", {
+      ? buildResumePrompt(userText, session.source || "web")
+      : buildFirstTurnPrompt(userText, session.source || "web", {
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
           includeWorkspaceMemory: !session.projectId,
