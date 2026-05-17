@@ -978,6 +978,7 @@
             position: relative;
             flex: 0 1 auto;
             min-width: 0;
+            margin-left: 1px;
         }
 
         .model-badge {
@@ -1676,7 +1677,7 @@
             border-radius: 14px;
             display: flex;
             align-items: flex-end;
-            gap: 6px;
+            gap: 9px;
             padding: 10px 12px 10px 10px;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }

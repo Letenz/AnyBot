@@ -115,6 +115,15 @@
                     </svg>
                 </button>
                 <textarea id="chat-input" placeholder="发送消息... 可粘贴图片或拖拽文件" rows="1"></textarea>
+                <div class="context-usage" id="context-usage" aria-label="上下文用量" tabindex="0">
+                    <div class="context-usage-ring" id="context-usage-ring"></div>
+                    <div class="context-usage-tooltip" id="context-usage-tooltip">
+                        <div class="context-tooltip-title">背景信息窗口：</div>
+                        <div><span id="context-usage-percent">0% 已用（剩余 100%）</span></div>
+                        <div><span id="context-usage-tokens">已用 0 token，共 0</span></div>
+                        <div class="context-tooltip-provider" id="context-usage-provider"></div>
+                    </div>
+                </div>
                 <div class="model-switcher" id="model-switcher">
                     <div class="model-dropdown" id="model-dropdown"></div>
                     <button class="model-badge" id="model-badge" type="button" aria-haspopup="listbox" aria-expanded="false">
@@ -124,15 +133,6 @@
                                   stroke-linejoin="round"/>
                         </svg>
                     </button>
-                </div>
-                <div class="context-usage" id="context-usage" aria-label="上下文用量" tabindex="0">
-                    <div class="context-usage-ring" id="context-usage-ring"></div>
-                    <div class="context-usage-tooltip" id="context-usage-tooltip">
-                        <div class="context-tooltip-title">背景信息窗口：</div>
-                        <div><span id="context-usage-percent">0% 已用（剩余 100%）</span></div>
-                        <div><span id="context-usage-tokens">已用 0 token，共 0</span></div>
-                        <div class="context-tooltip-provider" id="context-usage-provider"></div>
-                    </div>
                 </div>
                 <button id="send-btn" disabled>
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
