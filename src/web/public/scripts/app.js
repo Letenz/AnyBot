@@ -189,6 +189,12 @@
             sendBtn.disabled = (inputEl.value.trim() === '' && pendingAttachments.length === 0) || isTyping;
         }
 
+        function resizeChatInput() {
+            inputEl.style.height = 'auto';
+            inputEl.style.overflowY = inputEl.scrollHeight > 160 ? 'auto' : 'hidden';
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+        }
+
         function renderAttachmentPreview() {
             if (pendingAttachments.length === 0) {
                 attachmentPreview.style.display = 'none';
@@ -272,8 +278,7 @@
         }
 
         inputEl.addEventListener('input', function () {
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+            resizeChatInput();
             updateSendBtnState();
         });
 
@@ -1113,7 +1118,7 @@
                 updateContextUsage(null);
                 showEmptyState();
                 inputEl.value = '';
-                inputEl.style.height = 'auto';
+                resizeChatInput();
                 sendBtn.disabled = true;
                 inputEl.focus();
                 await fetchModelConfig(currentSessionProvider);
@@ -1275,7 +1280,7 @@
             var attachmentInfos = readyAttachments.map(function (a) { return { name: a.name, path: a.path }; });
 
             inputEl.value = '';
-            inputEl.style.height = 'auto';
+            resizeChatInput();
             sendBtn.disabled = true;
             isTyping = true;
 

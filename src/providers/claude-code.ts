@@ -33,6 +33,13 @@ import type { SandboxMode } from "../types.js";
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_CLAUDE_CODE_BIN = "claude";
 
+const WORKDIR_SAFETY_PROMPT = [
+  "## 工作目录规则",
+  "- 在进行任何文件操作之前，先使用 `pwd` 确认当前处于正确目录",
+  "- 未经用户明确确认，绝不要使用 `git reset --hard` 或 `git clean -fd`",
+  "- 对关键操作使用绝对路径",
+].join("\n");
+
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "LS"];
 const WORKSPACE_WRITE_TOOLS = [
   "Bash",
@@ -210,12 +217,12 @@ export class ClaudeCodeProvider implements IProvider {
   ): Promise<RunResult> {
     const {
       workdir,
-      prompt,
       model,
       sessionId,
       newSessionId,
       timeoutMs = DEFAULT_TIMEOUT_MS,
     } = opts;
+    const prompt = `${WORKDIR_SAFETY_PROMPT}\n\n${opts.prompt}`;
     const sandbox = opts.sandbox ?? "read-only";
     const startedAt = Date.now();
     const abortController = new AbortController();
