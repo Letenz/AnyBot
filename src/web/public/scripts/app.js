@@ -62,6 +62,7 @@
         const settingsProviderTrigger = document.getElementById('settings-provider-trigger');
         const settingsProviderCurrent = document.getElementById('settings-provider-current');
         const settingsProviderMenu = document.getElementById('settings-provider-menu');
+        const settingsThemeGroup = document.getElementById('settings-theme-group');
         const contextUsageEl = document.getElementById('context-usage');
         const contextUsageRingEl = document.getElementById('context-usage-ring');
         const contextUsagePercentEl = document.getElementById('context-usage-percent');
@@ -88,6 +89,11 @@
         let expandedProjectIds = readStoredSet('expandedProjectIds');
         const SESSION_MESSAGE_PAGE_SIZE = 40;
         const LARGE_MESSAGE_PREVIEW_CHARS = 20000;
+        const THEME_STORAGE_KEY = 'webuiTheme';
+        const HIGHLIGHT_DARK_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css';
+        const HIGHLIGHT_LIGHT_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+        const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+        let currentThemeSetting = readStoredTheme();
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -97,6 +103,67 @@
         let pendingAttachments = []; // { path, name, size, isImage, localUrl? }
 
         const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif', '.heic', '.heif', '.avif'];
+
+        function readStoredTheme() {
+            var value = localStorage.getItem(THEME_STORAGE_KEY);
+            return ['light', 'dark', 'system'].includes(value) ? value : 'dark';
+        }
+
+        function getEffectiveTheme(setting) {
+            if (setting === 'system') {
+                return systemThemeQuery && systemThemeQuery.matches ? 'light' : 'dark';
+            }
+            return setting === 'light' ? 'light' : 'dark';
+        }
+
+        function applyTheme(setting) {
+            currentThemeSetting = ['light', 'dark', 'system'].includes(setting) ? setting : 'dark';
+            var effectiveTheme = getEffectiveTheme(currentThemeSetting);
+            document.documentElement.dataset.theme = effectiveTheme;
+            document.documentElement.dataset.themeSetting = currentThemeSetting;
+            document.documentElement.style.colorScheme = effectiveTheme;
+
+            var highlightTheme = document.getElementById('highlight-theme');
+            if (highlightTheme) {
+                highlightTheme.href = effectiveTheme === 'light' ? HIGHLIGHT_LIGHT_CSS : HIGHLIGHT_DARK_CSS;
+            }
+
+            if (settingsThemeGroup) {
+                Array.prototype.forEach.call(settingsThemeGroup.querySelectorAll('.theme-option'), function (button) {
+                    var isActive = button.dataset.themeValue === currentThemeSetting;
+                    button.classList.toggle('active', isActive);
+                    button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+                });
+            }
+
+            if (latestContextUsage) updateContextUsage(latestContextUsage);
+        }
+
+        function setTheme(setting) {
+            localStorage.setItem(THEME_STORAGE_KEY, setting);
+            applyTheme(setting);
+        }
+
+        applyTheme(currentThemeSetting);
+
+        if (settingsThemeGroup) {
+            settingsThemeGroup.addEventListener('click', function (e) {
+                var button = e.target.closest('.theme-option');
+                if (!button || !settingsThemeGroup.contains(button)) return;
+                setTheme(button.dataset.themeValue);
+            });
+        }
+
+        if (systemThemeQuery) {
+            var handleSystemThemeChange = function () {
+                if (currentThemeSetting === 'system') applyTheme('system');
+            };
+            if (systemThemeQuery.addEventListener) {
+                systemThemeQuery.addEventListener('change', handleSystemThemeChange);
+            } else if (systemThemeQuery.addListener) {
+                systemThemeQuery.addListener(handleSystemThemeChange);
+            }
+        }
 
         function getFileTypeClass(name) {
             var ext = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
@@ -668,7 +735,7 @@
             contextUsageEl.classList.toggle('has-data', usedTokens > 0 && maxTokens > 0);
             contextUsageRingEl.style.background =
                 'radial-gradient(circle at center, var(--input-bg) 48%, transparent 50%), ' +
-                'conic-gradient(' + color + ' ' + degrees + 'deg, rgba(255, 255, 255, 0.11) ' + degrees + 'deg)';
+                'conic-gradient(' + color + ' ' + degrees + 'deg, var(--ring-track) ' + degrees + 'deg)';
 
             if (contextUsagePercentEl) {
                 contextUsagePercentEl.textContent =
