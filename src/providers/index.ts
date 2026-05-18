@@ -104,7 +104,7 @@ function getProviderBin(type: string, config: Record<string, unknown>): string {
     case "qoder-cli":
       return (config.bin as string | undefined) || "qodercli";
     case "claude-code":
-      return (config.pathToClaudeCodeExecutable as string | undefined) || "claude";
+      return (config.pathToClaudeCodeExecutable as string | undefined) || "bundled Claude Code";
     default:
       return type;
   }
@@ -121,7 +121,7 @@ function getProviderInstallHint(type: string): string {
     case "qoder-cli":
       return "详见 https://docs.qoder.com";
     case "claude-code":
-      return "安装并登录 Claude Code CLI；或设置 CLAUDE_CODE_BIN 指向 claude 可执行文件";
+      return "使用随 @anthropic-ai/claude-agent-sdk 安装的 Claude Code native binary；如需指定外部 CLI，可设置 CLAUDE_CODE_BIN";
     default:
       return "";
   }
@@ -131,6 +131,14 @@ export function getProviderInstallationStatus(type: string): ProviderInstallatio
   const normalizedType = normalizeProviderType(type);
   const config = getProviderConfig(normalizedType);
   const bin = getProviderBin(normalizedType, config);
+  if (normalizedType === "claude-code" && !config.pathToClaudeCodeExecutable) {
+    return {
+      installed: true,
+      bin,
+      executablePath: null,
+      installHint: getProviderInstallHint(normalizedType),
+    };
+  }
   const executablePath = resolveExecutable(bin);
   return {
     installed: executablePath !== null,

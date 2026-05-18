@@ -90,6 +90,28 @@ shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) &
   writeFile(path.join(releaseDir, "start-anybot-background.ps1"), `$ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+function Add-PathEntry {
+  param([string]$PathEntry)
+  if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+    return
+  }
+  $expanded = [Environment]::ExpandEnvironmentVariables($PathEntry)
+  if ((Test-Path $expanded) -and (($env:Path -split ';') -notcontains $expanded)) {
+    $env:Path = "$expanded;$env:Path"
+  }
+}
+
+foreach ($entry in ([Environment]::GetEnvironmentVariable("Path", "Machine") -split ';')) {
+  Add-PathEntry $entry
+}
+foreach ($entry in ([Environment]::GetEnvironmentVariable("Path", "User") -split ';')) {
+  Add-PathEntry $entry
+}
+Add-PathEntry "$env:APPDATA\\npm"
+Add-PathEntry "$env:LOCALAPPDATA\\Programs\\nodejs"
+Add-PathEntry "$env:ProgramFiles\\nodejs"
+Add-PathEntry "\${env:ProgramFiles(x86)}\\nodejs"
+
 if (-not (Test-Path ".env")) {
   Copy-Item ".env.example" ".env"
 }
@@ -132,6 +154,28 @@ Start-Process "http://localhost:19981"
 
   writeFile(path.join(releaseDir, "start-anybot.ps1"), `$ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
+
+function Add-PathEntry {
+  param([string]$PathEntry)
+  if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+    return
+  }
+  $expanded = [Environment]::ExpandEnvironmentVariables($PathEntry)
+  if ((Test-Path $expanded) -and (($env:Path -split ';') -notcontains $expanded)) {
+    $env:Path = "$expanded;$env:Path"
+  }
+}
+
+foreach ($entry in ([Environment]::GetEnvironmentVariable("Path", "Machine") -split ';')) {
+  Add-PathEntry $entry
+}
+foreach ($entry in ([Environment]::GetEnvironmentVariable("Path", "User") -split ';')) {
+  Add-PathEntry $entry
+}
+Add-PathEntry "$env:APPDATA\\npm"
+Add-PathEntry "$env:LOCALAPPDATA\\Programs\\nodejs"
+Add-PathEntry "$env:ProgramFiles\\nodejs"
+Add-PathEntry "\${env:ProgramFiles(x86)}\\nodejs"
 
 if (-not (Test-Path ".env")) {
   Copy-Item ".env.example" ".env"

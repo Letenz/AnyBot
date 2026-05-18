@@ -31,7 +31,6 @@ import { logger } from "../logger.js";
 import type { SandboxMode } from "../types.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
-const DEFAULT_CLAUDE_CODE_BIN = "claude";
 
 const WORKDIR_SAFETY_PROMPT = [
   "## 工作目录规则",
@@ -184,8 +183,7 @@ export class ClaudeCodeProvider implements IProvider {
     permissionMode?: PermissionMode;
     defaultModel?: string;
   }) {
-    this.pathToClaudeCodeExecutable =
-      opts?.pathToClaudeCodeExecutable || DEFAULT_CLAUDE_CODE_BIN;
+    this.pathToClaudeCodeExecutable = opts?.pathToClaudeCodeExecutable;
     this.maxTurns = opts?.maxTurns;
     this.permissionMode = opts?.permissionMode;
     this.defaultModel = opts?.defaultModel;
