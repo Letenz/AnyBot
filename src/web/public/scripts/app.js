@@ -95,8 +95,11 @@
         const THEME_STORAGE_KEY = 'webuiTheme';
         const HIGHLIGHT_DARK_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css';
         const HIGHLIGHT_LIGHT_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+        const SIDEBAR_REFRESH_INTERVAL_MS = 5000;
         const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
         let currentThemeSetting = readStoredTheme();
+        let sidebarRefreshTimer = null;
+        let isSidebarRefreshInFlight = false;
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -1060,6 +1063,34 @@
                 console.error('Failed to fetch projects:', e);
             }
         }
+
+        async function refreshSidebarDirectory() {
+            if (isSidebarRefreshInFlight) return;
+            isSidebarRefreshInFlight = true;
+            try {
+                await Promise.all([fetchProjects(), fetchSessions()]);
+                updateSidebarSelection();
+            } finally {
+                isSidebarRefreshInFlight = false;
+            }
+        }
+
+        function startSidebarAutoRefresh() {
+            if (sidebarRefreshTimer) clearInterval(sidebarRefreshTimer);
+            sidebarRefreshTimer = setInterval(function () {
+                if (document.hidden) return;
+                refreshSidebarDirectory();
+            }, SIDEBAR_REFRESH_INTERVAL_MS);
+        }
+
+        document.addEventListener('visibilitychange', function () {
+            if (document.hidden) return;
+            refreshSidebarDirectory();
+        });
+
+        window.addEventListener('beforeunload', function () {
+            if (sidebarRefreshTimer) clearInterval(sidebarRefreshTimer);
+        });
 
         async function addProject() {
             try {
@@ -2827,6 +2858,7 @@
             } else {
                 await createNewChat();
             }
+            startSidebarAutoRefresh();
             inputEl.focus();
         }
 
