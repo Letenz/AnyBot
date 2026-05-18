@@ -11,8 +11,13 @@ const bin = path.join(
   ".bin",
   process.platform === "win32" ? "electron-builder.cmd" : "electron-builder",
 );
+const args = process.argv.slice(2);
 
-const result = spawnSync(bin, process.argv.slice(2), {
+if (!args.some((arg) => arg === "--publish" || arg.startsWith("--publish="))) {
+  args.push("--publish", "never");
+}
+
+const result = spawnSync(bin, args, {
   cwd: root,
   stdio: "inherit",
   env: {
