@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -10,7 +10,8 @@ import {
 } from "../providers/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.resolve(__dirname, "../../.data/model-config.json");
+const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.resolve(__dirname, "../../.data");
+const CONFIG_PATH = path.join(dataDir, "model-config.json");
 
 export interface ModelEntry {
   id: string;
@@ -37,6 +38,7 @@ function buildDefaultConfig(): ModelConfig {
 }
 
 function ensureConfig(): void {
+  mkdirSync(dataDir, { recursive: true });
   if (!existsSync(CONFIG_PATH)) {
     writeFileSync(CONFIG_PATH, JSON.stringify(buildDefaultConfig(), null, 2), "utf-8");
   }

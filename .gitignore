@@ -3,6 +3,8 @@ node_modules
 dist
 .packaging
 release-assets
+dist-electron
+.electron-builder-cache
 .DS_Store
 .idea/
 .run/

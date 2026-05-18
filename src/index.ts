@@ -402,7 +402,27 @@ const channelCallbacks: ChannelCallbacks = {
 
 const WEB_PORT = parseInt(process.env.WEB_PORT || "19981", 10);
 
+function exitWhenDesktopParentDies(): void {
+  const parentPid = Number.parseInt(process.env.ANYBOT_DESKTOP_PARENT_PID || "", 10);
+  if (!Number.isFinite(parentPid) || parentPid <= 0) {
+    return;
+  }
+
+  const timer = setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      logger.warn("desktop.parent_gone");
+      process.exit(0);
+    }
+  }, 5000);
+
+  timer.unref();
+}
+
 async function main(): Promise<void> {
+  exitWhenDesktopParentDies();
+
   try {
     applyProxy();
   } catch (error) {

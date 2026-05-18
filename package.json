@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "setup": "node ./scripts/setup.mjs",
     "setup:unix": "sh ./setup.sh",
@@ -10,6 +11,11 @@
     "build": "tsc",
     "build:release": "tsc && node ./scripts/copy-release-assets.mjs",
     "package:portable": "node ./scripts/package-portable.mjs",
+    "package:desktop": "npm run build:release && node ./scripts/build-electron.mjs",
+    "electron:dev": "npm run build:release && electron .",
+    "electron:build": "npm run build:release && node ./scripts/build-electron.mjs",
+    "electron:build:mac": "npm run build:release && node ./scripts/build-electron.mjs --mac",
+    "electron:build:win": "npm run build:release && node ./scripts/build-electron.mjs --win",
     "start": "tsx src/index.ts",
     "check": "tsc --noEmit",
     "bot:start": "node ./scripts/bot.mjs start",
@@ -34,7 +40,59 @@
     "@types/multer": "^2.1.0",
     "@types/node": "^24.3.1",
     "@types/ws": "^8.18.1",
+    "electron": "^35.7.5",
+    "electron-builder": "^26.8.1",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
+  },
+  "build": {
+    "appId": "com.anybot.desktop",
+    "productName": "AnyBot",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json",
+      "package-lock.json",
+      ".env.example",
+      "!src/**",
+      "!scripts/**",
+      "!installer/**",
+      "!assets/**",
+      "!release-assets/**",
+      "!.packaging/**",
+      "!.run/**",
+      "!.data/**"
+    ],
+    "asar": false,
+    "afterPack": "./electron/afterPack.cjs",
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dmg"
+      ],
+      "icon": null
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "AnyBot",
+      "uninstallDisplayName": "AnyBot"
+    }
   }
 }

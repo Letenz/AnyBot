@@ -11,7 +11,8 @@ import type {
 } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.resolve(__dirname, "../../.data/channels.json");
+const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.resolve(__dirname, "../../.data");
+const CONFIG_PATH = path.join(dataDir, "channels.json");
 
 const DEFAULT_CONFIG: ChannelsConfig = {
   feishu: {

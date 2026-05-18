@@ -23,7 +23,8 @@ const LONG_POLL_TIMEOUT_MS = 35_000;
 const API_TIMEOUT_MS = 15_000;
 const LOGIN_TIMEOUT_MS = 8 * 60_000;
 const SESSION_EXPIRED_ERRCODE = -14;
-const SYNC_PATH = path.resolve(__dirname, "../../.data/weixin-sync.json");
+const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.resolve(__dirname, "../../.data");
+const SYNC_PATH = path.join(dataDir, "weixin-sync.json");
 
 const MessageItemType = {
   TEXT: 1,

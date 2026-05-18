@@ -12,7 +12,8 @@ export interface ProxyConfig {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_PATH = path.resolve(__dirname, "../../.data/proxy.json");
+const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.resolve(__dirname, "../../.data");
+const CONFIG_PATH = path.join(dataDir, "proxy.json");
 
 const DEFAULT_CONFIG: ProxyConfig = {
   enabled: false,
