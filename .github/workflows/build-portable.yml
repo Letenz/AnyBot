@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -50,25 +51,30 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
           $dir = Get-ChildItem .packaging -Directory -Filter "AnyBot-win-*" | Select-Object -First 1
           if (-not $dir) { throw "Windows package directory not found" }
-          $zip = "$($dir.FullName).zip"
+          $zip = Join-Path "release-assets" "$($dir.Name).zip"
           Compress-Archive -Force -Path "$($dir.FullName)\*" -DestinationPath $zip
+          Get-ChildItem release-assets
 
       - name: Zip macOS package
         if: runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p release-assets
           dir="$(find .packaging -maxdepth 1 -type d -name 'AnyBot-mac-*' | head -n 1)"
           test -n "$dir"
-          ditto -c -k --sequesterRsrc --keepParent "$dir" "${dir}.zip"
+          zip="release-assets/$(basename "$dir").zip"
+          ditto -c -k --sequesterRsrc --keepParent "$dir" "$zip"
+          ls -la release-assets
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: AnyBot-${{ matrix.platform }}
-          path: .packaging/AnyBot-${{ matrix.platform }}-*.zip
+          path: release-assets/AnyBot-${{ matrix.platform }}-*.zip
           if-no-files-found: error
 
   release:
