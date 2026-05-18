@@ -1,4 +1,3 @@
-import { spawn, execSync } from "node:child_process";
 import type {
   IProvider,
   RunOptions,
@@ -13,6 +12,7 @@ import {
   ProviderParseError,
 } from "./codex.js";
 import { logger } from "../logger.js";
+import { killProcessTree, runCommandSync, spawnCommand } from "../utils/process.js";
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -87,7 +87,7 @@ export class GeminiCliProvider implements IProvider {
     });
 
     return new Promise((resolve, reject) => {
-      const child = spawn(this.bin, args, {
+      const child = spawnCommand(this.bin, args, {
         cwd: workdir,
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
@@ -99,11 +99,7 @@ export class GeminiCliProvider implements IProvider {
       let killed = false;
 
       const killProcessGroup = (signal: NodeJS.Signals) => {
-        try {
-          if (child.pid) process.kill(-child.pid, signal);
-        } catch {
-          child.kill(signal);
-        }
+        killProcessTree(child, signal);
       };
 
       const timer = setTimeout(() => {
@@ -228,10 +224,9 @@ export class GeminiCliProvider implements IProvider {
 
   private resolveLatestSessionId(workdir: string): string | null {
     try {
-      const output = execSync(`${this.bin} --list-sessions`, {
+      const output = runCommandSync(this.bin, ["--list-sessions"], {
         cwd: workdir,
         timeout: 10_000,
-        encoding: "utf8",
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
       });

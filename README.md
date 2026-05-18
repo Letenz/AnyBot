@@ -6,7 +6,7 @@
 
 目前支持 [OpenAI Codex CLI](https://github.com/openai/codex)、[Google Gemini CLI](https://github.com/google-gemini/gemini-cli)、[Cursor CLI](https://docs.cursor.com/cli)、[Qoder CLI](https://docs.qoder.com) 和 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 作为 Provider。
 
-支持 **macOS** 和 **Linux**。
+支持 **macOS**、**Linux** 和 **Windows**。
 
 ---
 
@@ -25,7 +25,7 @@
 - **模型切换** — 在 Web UI 或聊天中通过 `/provider`、`/model` 命令随时切换 Provider 和模型
 - **聊天命令** — 所有频道统一支持 `/help`、`/new`、`/provider`、`/model` 命令
 - **后台运行** — 支持 daemon 模式，开机即用
-- **一键配置** — 交互式 `setup.sh` 引导完成所有配置，自动检测依赖、选择 Provider
+- **一键配置** — 交互式 `npm run setup` 引导完成所有配置，自动检测依赖、选择 Provider
 
 ---
 
@@ -69,6 +69,15 @@
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 使用本机已登录的 `claude` 命令；项目依赖已包含 SDK | Anthropic 的 CLI 工具 |
 
 <details>
+<summary><b>Windows 安装指南</b></summary>
+
+1. 从 [Node.js 官网](https://nodejs.org/)下载安装 LTS 版本。
+2. 安装 Git for Windows，或使用你已有的 Git 环境。
+3. 在 PowerShell / Windows Terminal 中运行后续命令。
+
+</details>
+
+<details>
 <summary><b>Linux 安装指南</b></summary>
 
 **Ubuntu / Debian：**
@@ -109,10 +118,10 @@ brew install node
 ```bash
 git clone https://github.com/1935417243/AnyBot.git
 cd AnyBot
-sh setup.sh
+npm run setup
 ```
 
-`setup.sh` 会引导你完成：
+`npm run setup` 会引导你完成：
 - 检测操作系统与基础依赖（Node.js、npm）
 - **选择默认 Provider**（Codex CLI / Gemini CLI / Cursor CLI / Qoder CLI / Claude Code）
 - 检测对应 CLI 或 SDK 配置，并提供安装指引
@@ -440,7 +449,7 @@ AnyBot 已在代码层面做了处理——在 Linux 上会自动以 `--sandbox 
 
 ## 环境变量
 
-在 `.env` 文件中配置（通过 `setup.sh` 生成或手动从 `.env.example` 复制）。
+在 `.env` 文件中配置（通过 `npm run setup` 生成或手动从 `.env.example` 复制）。
 
 ### 通用配置
 
@@ -603,11 +612,11 @@ AnyBot/
 │           ├── BOOTSTRAP.md # 首次启动引导
 │           ├── MEMORY.md   # 长期记忆模板
 │           └── PROFILE.md  # Agent 身份与用户档案
-├── scripts/                # daemon 控制脚本
-│   ├── bot-start.sh
-│   ├── bot-stop.sh
-│   └── bot-status.sh
-├── setup.sh                # 交互式配置引导
+├── scripts/                # 跨平台辅助脚本
+│   ├── bot.mjs             # daemon 控制脚本
+│   ├── setup.mjs           # 交互式配置引导
+│   └── claude-deepseek-wrapper.sh
+├── setup.sh                # macOS/Linux 旧版配置引导（可选）
 ├── .env.example            # 环境变量模板
 └── package.json
 ```

@@ -1,13 +1,11 @@
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
-import { spawnSync } from "node:child_process";
-import { accessSync, constants } from "node:fs";
-import path from "node:path";
 import type { IProvider } from "./types.js";
 import { CodexProvider } from "./codex.js";
 import { GeminiCliProvider } from "./gemini-cli.js";
 import { CursorCliProvider } from "./cursor-cli.js";
 import { QoderCliProvider } from "./qoder-cli.js";
 import { ClaudeCodeProvider } from "./claude-code.js";
+import { resolveExecutable } from "../utils/process.js";
 
 type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
 
@@ -127,24 +125,6 @@ function getProviderInstallHint(type: string): string {
     default:
       return "";
   }
-}
-
-function resolveExecutable(bin: string): string | null {
-  if (path.isAbsolute(bin) || bin.includes("/") || bin.includes("\\")) {
-    try {
-      accessSync(bin, constants.X_OK);
-      return bin;
-    } catch {
-      return null;
-    }
-  }
-
-  const result = spawnSync("which", [bin], {
-    encoding: "utf8",
-    timeout: 5_000,
-  });
-  if (result.status !== 0) return null;
-  return result.stdout.trim() || null;
 }
 
 export function getProviderInstallationStatus(type: string): ProviderInstallationStatus {
