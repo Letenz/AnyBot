@@ -81,6 +81,55 @@ echo.
 pause
 `, 0o755);
 
+  writeFile(path.join(releaseDir, "start-anybot.vbs"), `Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+dir = fso.GetParentFolderName(WScript.ScriptFullName)
+shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & dir & "\\start-anybot-background.ps1" & Chr(34), 0, False
+`, 0o755);
+
+  writeFile(path.join(releaseDir, "start-anybot-background.ps1"), `$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+
+if (-not (Test-Path ".env")) {
+  Copy-Item ".env.example" ".env"
+}
+
+New-Item -ItemType Directory -Force -Path ".data", ".run" | Out-Null
+
+if (Test-Path "resources\\md_files") {
+  foreach ($file in "AGENTS.md", "MEMORY.md", "PROFILE.md", "BOOTSTRAP.md") {
+    if (-not (Test-Path $file)) {
+      Copy-Item (Join-Path "resources\\md_files" $file) $file
+    }
+  }
+}
+
+$pidFile = Join-Path ".run" "anybot.pid"
+$logFile = Join-Path ".run" "anybot.log"
+$errFile = Join-Path ".run" "anybot.err.log"
+
+if (Test-Path $pidFile) {
+  $oldPid = (Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+  if ($oldPid -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
+    Start-Process "http://localhost:19981"
+    exit 0
+  }
+}
+
+$process = Start-Process \`
+  -FilePath (Join-Path $PSScriptRoot "node\\node.exe") \`
+  -ArgumentList (Join-Path $PSScriptRoot "dist\\index.js") \`
+  -WorkingDirectory $PSScriptRoot \`
+  -WindowStyle Hidden \`
+  -RedirectStandardOutput $logFile \`
+  -RedirectStandardError $errFile \`
+  -PassThru
+
+Set-Content -Path $pidFile -Value $process.Id
+Start-Sleep -Seconds 2
+Start-Process "http://localhost:19981"
+`, 0o755);
+
   writeFile(path.join(releaseDir, "start-anybot.ps1"), `$ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -100,6 +149,33 @@ if (Test-Path "resources\\md_files") {
 
 Write-Host "AnyBot Web UI: http://localhost:19981"
 & "$PSScriptRoot\\node\\node.exe" "$PSScriptRoot\\dist\\index.js"
+`, 0o755);
+
+  writeFile(path.join(releaseDir, "stop-anybot.ps1"), `$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+
+$pidFile = Join-Path ".run" "anybot.pid"
+if (-not (Test-Path $pidFile)) {
+  Write-Host "AnyBot is not running."
+  exit 0
+}
+
+$targetPid = (Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+if ($targetPid -and (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)) {
+  Stop-Process -Id $targetPid -Force
+  Write-Host "AnyBot stopped."
+} else {
+  Write-Host "AnyBot is not running."
+}
+
+Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+`, 0o755);
+
+  writeFile(path.join(releaseDir, "stop-anybot.cmd"), `@echo off
+setlocal
+cd /d "%~dp0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop-anybot.ps1"
+pause
 `, 0o755);
 }
 

@@ -1,4 +1,4 @@
-name: Build Portable Packages
+name: Build Packages
 
 on:
   workflow_dispatch:
@@ -17,8 +17,10 @@ jobs:
         include:
           - os: windows-latest
             platform: win
+            artifact-path: release-assets/AnyBot-Setup-*.exe
           - os: macos-latest
             platform: mac
+            artifact-path: release-assets/AnyBot-mac-*.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -47,15 +49,15 @@ jobs:
       - name: Assemble portable package
         run: npm run package:portable
 
-      - name: Zip Windows package
+      - name: Build Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          $dir = Get-ChildItem .packaging -Directory -Filter "AnyBot-win-*" | Select-Object -First 1
-          if (-not $dir) { throw "Windows package directory not found" }
-          $zip = Join-Path "release-assets" "$($dir.Name).zip"
-          Compress-Archive -Force -Path "$($dir.FullName)\*" -DestinationPath $zip
+          choco install innosetup --no-progress --yes
+          $env:APP_VERSION = (Get-Content package.json | ConvertFrom-Json).version
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "installer\windows\AnyBot.iss"
           Get-ChildItem release-assets
 
       - name: Zip macOS package
@@ -74,7 +76,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AnyBot-${{ matrix.platform }}
-          path: release-assets/AnyBot-${{ matrix.platform }}-*.zip
+          path: ${{ matrix.artifact-path }}
           if-no-files-found: error
 
   release:
@@ -94,18 +96,18 @@ jobs:
         with:
           name: AnyBot ${{ github.ref_name }}
           body: |
-            ## AnyBot Portable Packages
+            ## AnyBot Packages
 
             | 平台 | 文件 |
             |------|------|
             | macOS | `AnyBot-mac-*.zip` |
-            | Windows | `AnyBot-win-*.zip` |
+            | Windows | `AnyBot-Setup-*-x64.exe` |
 
             ### 使用说明
             - **macOS**：解压后双击 `start-anybot.command`，打开 `http://localhost:19981`。
-            - **Windows**：解压后双击 `start-anybot.cmd`，打开 `http://localhost:19981`。
+            - **Windows**：运行 `AnyBot-Setup-*-x64.exe` 安装，安装后从开始菜单或桌面快捷方式启动。
             - 包内自带 AnyBot 运行用的 Node.js 22；Codex/Gemini/Claude/Cursor/Qoder 等 Provider CLI 仍需用户自行安装并登录。
-          files: release-assets/*.zip
+          files: release-assets/*
           draft: false
           prerelease: false
         env:
