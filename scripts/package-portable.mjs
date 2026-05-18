@@ -112,6 +112,20 @@ Add-PathEntry "$env:LOCALAPPDATA\\Programs\\nodejs"
 Add-PathEntry "$env:ProgramFiles\\nodejs"
 Add-PathEntry "\${env:ProgramFiles(x86)}\\nodejs"
 
+function Open-AnyBotWindow {
+  $url = "http://localhost:19981"
+  $browser = Get-Command "msedge.exe" -ErrorAction SilentlyContinue
+  if (-not $browser) {
+    $browser = Get-Command "chrome.exe" -ErrorAction SilentlyContinue
+  }
+
+  if ($browser) {
+    Start-Process -FilePath $browser.Source -ArgumentList "--app=$url"
+  } else {
+    Start-Process $url
+  }
+}
+
 if (-not (Test-Path ".env")) {
   Copy-Item ".env.example" ".env"
 }
@@ -133,7 +147,7 @@ $errFile = Join-Path ".run" "anybot.err.log"
 if (Test-Path $pidFile) {
   $oldPid = (Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
   if ($oldPid -and (Get-Process -Id $oldPid -ErrorAction SilentlyContinue)) {
-    Start-Process "http://localhost:19981"
+    Open-AnyBotWindow
     exit 0
   }
 }
@@ -149,7 +163,7 @@ $process = Start-Process \`
 
 Set-Content -Path $pidFile -Value $process.Id
 Start-Sleep -Seconds 2
-Start-Process "http://localhost:19981"
+Open-AnyBotWindow
 `, 0o755);
 
   writeFile(path.join(releaseDir, "start-anybot.ps1"), `$ErrorActionPreference = "Stop"
