@@ -24,6 +24,7 @@ import {
 import {
   getCurrentModel,
   getModelForProvider,
+  readPersistedProviderType,
   readModelConfig,
   setCurrentProvider,
   setCurrentModel,
@@ -55,7 +56,7 @@ import {
   type PublicChangeReview,
 } from "./web/change-review.js";
 
-const providerType = normalizeProviderType(process.env.PROVIDER || "codex");
+const providerType = readPersistedProviderType() || normalizeProviderType(process.env.PROVIDER || "codex");
 
 const provider = initProvider(providerType, getProviderConfig(providerType));
 

@@ -44,6 +44,25 @@ function ensureConfig(): void {
   }
 }
 
+export function readPersistedProviderType(): string | null {
+  if (!existsSync(CONFIG_PATH)) {
+    return null;
+  }
+
+  try {
+    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    const providerType = (JSON.parse(raw) as Partial<ModelConfig>).provider;
+    if (!providerType) {
+      return null;
+    }
+
+    const normalizedType = providerType === "claude-agent" ? "claude-code" : providerType;
+    return getRegisteredProviderTypes().includes(normalizedType) ? normalizedType : null;
+  } catch {
+    return null;
+  }
+}
+
 function areSameModels(a: ModelEntry[] | undefined, b: ModelEntry[]): boolean {
   return (
     !!a &&
