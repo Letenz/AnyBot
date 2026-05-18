@@ -53,9 +53,7 @@
         const modelDropdown = document.getElementById('model-dropdown');
         const currentModelNameEl = document.getElementById('current-model-name');
         const settingsBtn = document.getElementById('settings-btn');
-        const settingsOverlay = document.getElementById('settings-overlay');
-        const settingsCloseBtn = document.getElementById('settings-close-btn');
-        const settingsTopCloseBtn = document.getElementById('settings-top-close-btn');
+        const settingsView = document.getElementById('settings-view');
         const settingsCancelBtn = document.getElementById('settings-cancel-btn');
         const settingsSaveBtn = document.getElementById('settings-save-btn');
         const settingsSaveStatus = document.getElementById('settings-save-status');
@@ -2044,6 +2042,8 @@
         }
 
         function openSettingsPanel() {
+            hideAllViews();
+            currentView = 'settings';
             setSettingsTab(activeSettingsTab || 'general');
             if (appSettings) renderAppSettings();
             if (providerData) renderProviderSelect();
@@ -2051,8 +2051,7 @@
                 selectedSandbox = sandboxConfig.defaultSandbox;
                 renderSandboxOptions();
             }
-            settingsOverlay.classList.add('open');
-            settingsOverlay.setAttribute('aria-hidden', 'false');
+            settingsView.style.display = 'flex';
             settingsBtn.classList.add('active');
             modelSwitcher.classList.remove('open');
             modelBadge.setAttribute('aria-expanded', 'false');
@@ -2064,9 +2063,7 @@
 
         function closeSettingsPanel() {
             setSettingsProviderMenuOpen(false);
-            settingsOverlay.classList.remove('open');
-            settingsOverlay.setAttribute('aria-hidden', 'true');
-            settingsBtn.classList.remove('active');
+            showChatView();
         }
 
         var workdirSaveTimer = null;
@@ -2164,8 +2161,6 @@
             openSettingsPanel();
         });
 
-        settingsCloseBtn.addEventListener('click', closeSettingsPanel);
-        if (settingsTopCloseBtn) settingsTopCloseBtn.addEventListener('click', closeSettingsPanel);
         if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', closeSettingsPanel);
         if (settingsProviderDetectBtn) {
             settingsProviderDetectBtn.addEventListener('click', async function () {
@@ -2263,10 +2258,6 @@
             }
         }
 
-        settingsOverlay.addEventListener('click', function (e) {
-            if (e.target === settingsOverlay) closeSettingsPanel();
-        });
-
         document.addEventListener('click', function (e) {
             if (!modelSwitcher.contains(e.target)) {
                 modelSwitcher.classList.remove('open');
@@ -2286,7 +2277,7 @@
                 }
                 modelSwitcher.classList.remove('open');
                 modelBadge.setAttribute('aria-expanded', 'false');
-                if (settingsOverlay.classList.contains('open')) closeSettingsPanel();
+                if (currentView === 'settings') closeSettingsPanel();
             }
         });
 
@@ -2322,10 +2313,12 @@
             channelView.style.display = 'none';
             skillsView.style.display = 'none';
             proxyView.style.display = 'none';
+            settingsView.style.display = 'none';
             newChatBtn.classList.remove('active');
             channelsBtn.classList.remove('active');
             skillsBtn.classList.remove('active');
             proxyBtn.classList.remove('active');
+            settingsBtn.classList.remove('active');
         }
 
         function showChatView() {

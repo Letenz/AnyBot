@@ -1487,16 +1487,48 @@
             font-size: 12px;
         }
 
+        .settings-view {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            background: var(--bg);
+        }
+
+        .settings-view .settings-panel {
+            width: 100%;
+            max-width: none;
+            height: 100%;
+            border: none;
+            border-radius: 0;
+            box-shadow: none;
+            transform: none;
+            transition: none;
+        }
+
+        .settings-view .settings-panel-header {
+            padding-top: 44px;
+        }
+
+        .settings-view .settings-tab-panel {
+            max-width: 860px;
+        }
+
+        .settings-view .settings-panel-actions {
+            border-top: none;
+        }
+
         .settings-panel-actions {
             padding: 16px 40px 24px;
         }
 
         @media (max-width: 760px) {
-            .settings-overlay {
+            .settings-overlay,
+            .settings-view {
                 padding: 0;
             }
 
-            .settings-panel {
+            .settings-panel,
+            .settings-view .settings-panel {
                 width: 100vw;
                 height: 100vh;
                 border-radius: 0;
