@@ -173,68 +173,98 @@
 
 <div id="settings-overlay" class="settings-overlay" aria-hidden="true">
     <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <div class="settings-panel-header">
-            <div>
-                <div class="settings-panel-title" id="settings-title">设置</div>
-                <div class="settings-panel-subtitle">调整当前对话的运行配置</div>
-            </div>
-            <button id="settings-close-btn" class="settings-icon-btn" type="button" aria-label="关闭设置">
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                    <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        <aside class="settings-sidebar" aria-label="设置分组">
+            <button class="settings-back-btn" id="settings-close-btn" type="button">
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
+                返回应用
             </button>
-        </div>
-        <div class="settings-panel-body">
-            <div class="settings-field">
-                <span class="settings-field-label" id="settings-theme-label">主题</span>
-                <div class="theme-segmented" id="settings-theme-group" role="radiogroup" aria-labelledby="settings-theme-label">
-                    <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="light">
-                        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.4"/>
-                            <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
-                        浅色
-                    </button>
-                    <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="dark">
-                        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <path d="M12.8 10.2A5.4 5.4 0 0 1 5.8 3.2a5.9 5.9 0 1 0 7 7Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-                        </svg>
-                        深色
-                    </button>
-                    <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="system">
-                        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <rect x="2" y="3" width="12" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3"/>
-                            <path d="M6 13h4M8 11v2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
-                        </svg>
-                        自动
-                    </button>
+            <div class="settings-nav" role="tablist" aria-label="设置分组">
+                <button class="settings-nav-item active" type="button" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
+                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="provider">提供商</button>
+                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="workspace">工作区</button>
+                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="privacy">隐私与日志</button>
+            </div>
+        </aside>
+        <div class="settings-main">
+            <div class="settings-panel-header">
+                <div>
+                    <div class="settings-panel-title" id="settings-title">常规</div>
+                    <div class="settings-panel-subtitle" id="settings-subtitle">应用外观、语言和启动行为</div>
                 </div>
+                <button id="settings-top-close-btn" class="settings-icon-btn" type="button" aria-label="关闭设置">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                        <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </svg>
+                </button>
             </div>
-            <div class="settings-field">
-                <span class="settings-field-label" id="settings-provider-label">默认提供商</span>
-                <div class="settings-combobox" id="settings-provider-combobox">
-                    <button class="settings-combobox-trigger" id="settings-provider-trigger" type="button"
-                            aria-haspopup="listbox" aria-expanded="false"
-                            aria-labelledby="settings-provider-label settings-provider-current">
-                        <span class="settings-combobox-value" id="settings-provider-current">加载中…</span>
-                        <svg class="settings-combobox-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                            <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"
-                                  stroke-linejoin="round"/>
-                        </svg>
-                    </button>
-                    <div class="settings-combobox-menu" id="settings-provider-menu" role="listbox"
-                         aria-labelledby="settings-provider-label"></div>
-                </div>
-                <select class="settings-select" id="settings-provider-select" aria-hidden="true" tabindex="-1"></select>
+            <div class="settings-panel-body">
+                <section class="settings-tab-panel active" data-settings-panel="general" role="tabpanel">
+                    <div class="settings-section-card">
+                        <div class="settings-section-title">外观</div>
+                        <div class="settings-field">
+                            <span class="settings-field-label" id="settings-theme-label">主题</span>
+                            <div class="theme-segmented" id="settings-theme-group" role="radiogroup" aria-labelledby="settings-theme-label">
+                                <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="light">浅色</button>
+                                <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="dark">深色</button>
+                                <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="system">自动</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-section-card">
+                        <div class="settings-section-title">权限</div>
+                        <div class="settings-field">
+                            <span class="settings-field-label" id="settings-sandbox-label">默认权限</span>
+                            <div class="sandbox-segmented" id="settings-sandbox-group" role="radiogroup" aria-labelledby="settings-sandbox-label"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="settings-tab-panel" data-settings-panel="provider" role="tabpanel">
+                    <div class="settings-section-card">
+                        <div class="settings-section-title">提供商</div>
+                        <div class="settings-field">
+                            <span class="settings-field-label" id="settings-provider-label">默认提供商</span>
+                            <div class="settings-combobox" id="settings-provider-combobox">
+                                <button class="settings-combobox-trigger" id="settings-provider-trigger" type="button"
+                                        aria-haspopup="listbox" aria-expanded="false"
+                                        aria-labelledby="settings-provider-label settings-provider-current">
+                                    <span class="settings-combobox-value" id="settings-provider-current">加载中…</span>
+                                    <svg class="settings-combobox-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                        <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </button>
+                                <div class="settings-combobox-menu" id="settings-provider-menu" role="listbox" aria-labelledby="settings-provider-label"></div>
+                            </div>
+                            <select class="settings-select" id="settings-provider-select" aria-hidden="true" tabindex="-1"></select>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="settings-tab-panel" data-settings-panel="workspace" role="tabpanel">
+                    <div class="settings-section-card">
+                        <div class="settings-section-title">默认工作目录</div>
+                        <div class="settings-path-row">
+                            <input class="settings-inline-input" id="settings-default-workdir" type="text" spellcheck="false">
+                            <button class="settings-secondary-btn compact" id="settings-workdir-pick-btn" type="button">选择</button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="settings-tab-panel" data-settings-panel="privacy" role="tabpanel">
+                    <div class="settings-section-card">
+                        <div class="settings-section-title">日志</div>
+                        <div class="settings-button-row">
+                            <button class="settings-secondary-btn compact" id="settings-open-logs-btn" type="button">打开日志目录</button>
+                            <button class="settings-danger-btn compact" id="settings-clear-logs-btn" type="button">清空日志</button>
+                        </div>
+                    </div>
+                </section>
             </div>
-            <div class="settings-field">
-                <span class="settings-field-label" id="settings-sandbox-label">默认权限</span>
-                <div class="sandbox-segmented" id="settings-sandbox-group" role="radiogroup" aria-labelledby="settings-sandbox-label"></div>
+            <div class="settings-panel-actions">
+                <span class="settings-save-status" id="settings-save-status"></span>
             </div>
-        </div>
-        <div class="settings-panel-actions">
-            <button id="settings-cancel-btn" class="settings-secondary-btn" type="button">取消</button>
-            <button id="settings-save-btn" class="settings-primary-btn" type="button">保存</button>
         </div>
     </section>
 </div>

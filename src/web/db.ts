@@ -179,6 +179,7 @@ const stmts = {
   `),
 
   deleteSession: db.prepare(`DELETE FROM sessions WHERE id = ?`),
+  deleteAllSessions: db.prepare(`DELETE FROM sessions`),
 
   insertMessage: db.prepare(`
     INSERT INTO messages (session_id, role, content, metadata) VALUES (?, ?, ?, ?)
@@ -357,6 +358,10 @@ export function updateSession(session: {
 
 export function deleteSession(id: string): void {
   stmts.deleteSession.run(id);
+}
+
+export function deleteAllSessions(): void {
+  stmts.deleteAllSessions.run();
 }
 
 export function addMessage(sessionId: string, role: "user" | "assistant", content: string, metadata?: string | null): number {

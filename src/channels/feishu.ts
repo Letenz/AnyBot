@@ -16,8 +16,6 @@ import { handleCommand } from "./commands.js";
 
 import type * as Lark from "@larksuiteoapi/node-sdk";
 
-const shouldLogContent = includeContentInLogs();
-
 const MAX_HANDLED_IDS = 5000;
 
 class CappedSet<T> {
@@ -169,7 +167,7 @@ export class FeishuChannel implements IChannel {
       messageType: message.message_type,
       senderType: sender.sender_type,
       mentionCount: message.mentions?.length || 0,
-      ...(shouldLogContent
+      ...(includeContentInLogs()
         ? { larkContent: rawLogString(message.content) }
         : {}),
     });

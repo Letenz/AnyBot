@@ -6,6 +6,7 @@ type RawLogString = {
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { readAppSettings } from "./app-settings.js";
 
 const levelWeight: Record<LogLevel, number> = {
   debug: 10,
@@ -14,9 +15,6 @@ const levelWeight: Record<LogLevel, number> = {
   error: 40,
 };
 
-const configuredLevel = parseLogLevel(process.env.LOG_LEVEL);
-const logContentEnabled = parseBooleanFlag(process.env.LOG_INCLUDE_CONTENT);
-const logPromptEnabled = parseBooleanFlag(process.env.LOG_INCLUDE_PROMPT);
 const logToStdout = resolveLogToStdout(process.env.LOG_TO_STDOUT);
 const logDir = path.resolve(process.env.LOG_DIR || ".run");
 const logBaseName = process.env.LOG_BASENAME || "bot.log";
@@ -54,7 +52,7 @@ function resolveLogToStdout(value?: string): boolean {
 }
 
 function shouldLog(level: LogLevel): boolean {
-  return levelWeight[level] >= levelWeight[configuredLevel];
+  return levelWeight[level] >= levelWeight[getConfiguredLevel()];
 }
 
 function serializeError(error: unknown) {
@@ -109,11 +107,23 @@ export function rawLogString(value: string): RawLogString {
 }
 
 export function includeContentInLogs(): boolean {
-  return logContentEnabled;
+  return process.env.LOG_INCLUDE_CONTENT !== undefined
+    ? parseBooleanFlag(process.env.LOG_INCLUDE_CONTENT)
+    : readAppSettings().privacy.logIncludeContent;
 }
 
 export function includePromptInLogs(): boolean {
-  return logPromptEnabled;
+  return process.env.LOG_INCLUDE_PROMPT !== undefined
+    ? parseBooleanFlag(process.env.LOG_INCLUDE_PROMPT)
+    : readAppSettings().privacy.logIncludePrompt;
+}
+
+export function getLogDir(): string {
+  return logDir;
+}
+
+function getConfiguredLevel(): LogLevel {
+  return parseLogLevel(process.env.LOG_LEVEL || readAppSettings().privacy.logLevel);
 }
 
 /** 生成带本地时区偏移的 ISO 时间字符串，例如 2026-03-15T19:51:25.038+08:00 */

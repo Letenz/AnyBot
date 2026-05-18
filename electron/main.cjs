@@ -11,6 +11,10 @@ let logStream = null;
 let logFilePath = null;
 
 const DEFAULT_WEB_PORT = 19981;
+const DEFAULT_DESKTOP_SETTINGS = {
+  openAtLogin: false,
+  openWindowOnStart: true,
+};
 
 function getAppRoot() {
   return path.resolve(__dirname, "..");
@@ -49,57 +53,73 @@ function copyIfMissing(source, target) {
 
 function prepareUserData() {
   const userData = app.getPath("userData");
-  const appRoot = getAppRoot();
 
   ensureDir(userData);
   ensureDir(path.join(userData, ".data"));
   ensureDir(path.join(userData, ".run"));
   ensureDir(path.join(userData, "tmp", "uploads"));
 
-  copyIfMissing(path.join(appRoot, ".env.example"), path.join(userData, ".env"));
-
+  const appRoot = getAppRoot();
   const mdSource = path.join(appRoot, "dist", "agent", "md_files");
   for (const file of ["AGENTS.md", "MEMORY.md", "PROFILE.md", "BOOTSTRAP.md"]) {
     copyIfMissing(path.join(mdSource, file), path.join(userData, file));
   }
 }
 
-function parseEnvFile(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return {};
-  }
-
-  const result = {};
-  const raw = fs.readFileSync(filePath, "utf8");
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const eq = trimmed.indexOf("=");
-    if (eq === -1) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    result[key] = value;
-  }
-  return result;
-}
-
 function resolveWebPort() {
-  const envFile = parseEnvFile(path.join(app.getPath("userData"), ".env"));
-  const raw = process.env.WEB_PORT || envFile.WEB_PORT || String(DEFAULT_WEB_PORT);
+  const raw = process.env.WEB_PORT || readConfiguredWebPort() || String(DEFAULT_WEB_PORT);
   const port = Number.parseInt(raw, 10);
   return Number.isFinite(port) && port > 0 ? port : DEFAULT_WEB_PORT;
+}
+
+function readConfiguredWebPort() {
+  const settingsPath = path.join(app.getPath("userData"), ".data", "app-settings.json");
+  if (!fs.existsSync(settingsPath)) {
+    return null;
+  }
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    return settings?.general?.webPort ? String(settings.general.webPort) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readDesktopSettings() {
+  const settingsPath = path.join(app.getPath("userData"), ".data", "app-settings.json");
+  if (!fs.existsSync(settingsPath)) {
+    return DEFAULT_DESKTOP_SETTINGS;
+  }
+
+  try {
+    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    return {
+      openAtLogin:
+        typeof settings?.general?.openAtLogin === "boolean"
+          ? settings.general.openAtLogin
+          : DEFAULT_DESKTOP_SETTINGS.openAtLogin,
+      openWindowOnStart:
+        typeof settings?.general?.openWindowOnStart === "boolean"
+          ? settings.general.openWindowOnStart
+          : DEFAULT_DESKTOP_SETTINGS.openWindowOnStart,
+    };
+  } catch {
+    return DEFAULT_DESKTOP_SETTINGS;
+  }
+}
+
+function applyDesktopSettings() {
+  const settings = readDesktopSettings();
+  const canSetLoginItem = app.isPackaged && (process.platform === "darwin" || process.platform === "win32");
+
+  if (canSetLoginItem) {
+    app.setLoginItemSettings({
+      openAtLogin: settings.openAtLogin,
+      openAsHidden: !settings.openWindowOnStart,
+    });
+  }
+
+  return settings;
 }
 
 function buildPathEnv(existingPath) {
@@ -325,8 +345,11 @@ app.whenReady().then(async () => {
     initLog();
     prepareUserData();
     createMenu();
+    const desktopSettings = applyDesktopSettings();
     await startBackend();
-    createWindow();
+    if (desktopSettings.openWindowOnStart) {
+      createWindow();
+    }
   } catch (error) {
     writeLog("main:error", error.stack || error.message);
     dialog.showErrorBox("AnyBot failed to start", error.message || String(error));

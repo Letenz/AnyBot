@@ -8,8 +8,6 @@ import { sanitizeUserText } from "../message.js";
 import { includeContentInLogs, logger, rawLogString } from "../logger.js";
 import { handleCommand } from "./commands.js";
 
-const shouldLogContent = includeContentInLogs();
-
 const TELEGRAM_API = "https://api.telegram.org";
 const POLL_TIMEOUT_SECS = 30;
 const POLL_FETCH_TIMEOUT_MS = (POLL_TIMEOUT_SECS + 15) * 1000;
@@ -225,7 +223,7 @@ export class TelegramChannel implements IChannel {
       chatId,
       chatType: message.chat.type,
       hasPhoto: !!message.photo,
-      ...(shouldLogContent ? { text: rawLogString(message.text || message.caption || "") } : {}),
+      ...(includeContentInLogs() ? { text: rawLogString(message.text || message.caption || "") } : {}),
     });
 
     if (message.photo) {

@@ -23,8 +23,8 @@ export const sandboxModeOptions: Array<{
   },
   {
     id: "workspace-write",
-    name: "项目可写",
-    description: "允许修改当前项目文件，推荐日常开发使用",
+    name: "工作区可写",
+    description: "允许修改当前工作区文件，推荐日常开发使用",
   },
   {
     id: "danger-full-access",

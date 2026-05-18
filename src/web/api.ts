@@ -8,10 +8,14 @@ import { promisify } from "node:util";
 import type { Request, Response } from "express";
 import { createProvider, getProvider, getRegisteredProviderTypes } from "../providers/index.js";
 import { logger } from "../logger.js";
+import { getLogDir } from "../logger.js";
+import { getDataDir, readAppSettings, updateAppSettings, writeAppSettings, type AppSettings } from "../app-settings.js";
+import { openDirectory } from "../utils/open-directory.js";
 import * as db from "./db.js";
 import {
   readModelConfig,
   readModelConfigForProvider,
+  writeModelConfig,
   getModelForProvider,
   setCurrentModel,
   setModelForProvider,
@@ -21,6 +25,7 @@ import {
 import { readSandboxConfig, sandboxModeOptions, setDefaultSandbox } from "../sandbox-config.js";
 import {
   readChannelsConfig,
+  writeChannelsConfig,
   updateChannelConfig,
   getRegisteredChannelTypes,
   channelManager,
@@ -69,6 +74,10 @@ const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".
 
 function isImageFile(filePath: string): boolean {
   return IMAGE_EXTS.has(path.extname(filePath).toLowerCase());
+}
+
+function getUploadDir(): string {
+  return path.join(getWorkdir(), "tmp", "uploads");
 }
 
 function isStreamingProvider(
@@ -320,16 +329,13 @@ function getSessionWorkdir(session: Pick<db.ChatSession, "projectId">): string {
   return normalizeProjectPath(project.path);
 }
 
-// 上传目录：使用配置的工作目录
-const UPLOAD_DIR = path.join(getWorkdir(), "tmp", "uploads");
-try { fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (_) {}
-
 // multer 配置：保留原始扩展名
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
     // 每次上传时确保目录存在（防止运行中被删除）
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-    cb(null, UPLOAD_DIR);
+    const uploadDir = getUploadDir();
+    fs.mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
   },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -475,6 +481,59 @@ export function chatRouter(): Router {
     const id = req.params.id as string;
     db.deleteSession(id);
     res.json({ ok: true });
+  });
+
+  // --- App settings ---
+
+  router.get("/app-settings", (_req: Request, res: Response) => {
+    try {
+      res.json({
+        settings: readAppSettings(),
+        effective: {
+          dataDir: getDataDir(),
+          logDir: getLogDir(),
+          workdir: getWorkdir(),
+          uploadDir: getUploadDir(),
+        },
+      });
+    } catch (error) {
+      res.status(500).json({ error: "读取设置失败" });
+    }
+  });
+
+  router.put("/app-settings", (req: Request, res: Response) => {
+    try {
+      const settings = req.body as Partial<AppSettings>;
+      if (settings.workspace?.defaultWorkdir) {
+        settings.workspace.defaultWorkdir = normalizeProjectPath(settings.workspace.defaultWorkdir);
+      }
+      const next = updateAppSettings(settings);
+      logger.info("app_settings.updated");
+      res.json({
+        settings: next,
+        effective: {
+          dataDir: getDataDir(),
+          logDir: getLogDir(),
+          workdir: getWorkdir(),
+          uploadDir: getUploadDir(),
+        },
+      });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "保存设置失败" });
+    }
+  });
+
+  router.post("/app-settings/default-workdir/pick", async (_req: Request, res: Response) => {
+    try {
+      const selected = await pickProjectFolder();
+      if (!selected) {
+        res.json({ canceled: true });
+        return;
+      }
+      res.json({ path: normalizeProjectPath(selected) });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "选择默认工作目录失败" });
+    }
   });
 
   // --- Model & Provider config ---
@@ -721,6 +780,103 @@ export function chatRouter(): Router {
       res.json({ ok: false, error: msg });
     } finally {
       agent?.close();
+    }
+  });
+
+  // --- Logs & data ---
+
+  router.post("/logs/open", (_req: Request, res: Response) => {
+    try {
+      fs.mkdirSync(getLogDir(), { recursive: true });
+      openDirectory(getLogDir());
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "打开日志目录失败" });
+    }
+  });
+
+  router.delete("/logs", (_req: Request, res: Response) => {
+    try {
+      fs.rmSync(getLogDir(), { recursive: true, force: true });
+      fs.mkdirSync(getLogDir(), { recursive: true });
+      logger.info("logs.cleared");
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "清空日志失败" });
+    }
+  });
+
+  router.post("/data/open", (_req: Request, res: Response) => {
+    try {
+      fs.mkdirSync(getDataDir(), { recursive: true });
+      openDirectory(getDataDir());
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "打开数据目录失败" });
+    }
+  });
+
+  router.delete("/data/uploads", (_req: Request, res: Response) => {
+    try {
+      fs.rmSync(getUploadDir(), { recursive: true, force: true });
+      fs.mkdirSync(getUploadDir(), { recursive: true });
+      logger.info("uploads.cleared");
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "清理上传文件失败" });
+    }
+  });
+
+  router.delete("/data/history", (_req: Request, res: Response) => {
+    try {
+      db.deleteAllSessions();
+      logger.info("history.cleared");
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: "清空历史失败" });
+    }
+  });
+
+  router.get("/data/export", (_req: Request, res: Response) => {
+    try {
+      const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        appSettings: readAppSettings(),
+        modelConfig: readModelConfig(),
+        sandboxConfig: readSandboxConfig(),
+        proxyConfig: readProxyConfig(),
+        channelsConfig: readChannelsConfig(),
+      };
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("Content-Disposition", `attachment; filename="anybot-config-${Date.now()}.json"`);
+      res.send(JSON.stringify(payload, null, 2));
+    } catch (error) {
+      res.status(500).json({ error: "导出配置失败" });
+    }
+  });
+
+  router.put("/data/import", (req: Request, res: Response) => {
+    try {
+      const payload = req.body as {
+        appSettings?: AppSettings;
+        modelConfig?: ReturnType<typeof readModelConfig>;
+        sandboxConfig?: ReturnType<typeof readSandboxConfig>;
+        proxyConfig?: ProxyConfig;
+        channelsConfig?: ReturnType<typeof readChannelsConfig>;
+      };
+      if (payload.appSettings) writeAppSettings(payload.appSettings);
+      if (payload.modelConfig) writeModelConfig(payload.modelConfig);
+      if (payload.sandboxConfig?.defaultSandbox) setDefaultSandbox(payload.sandboxConfig.defaultSandbox);
+      if (payload.proxyConfig) {
+        writeProxyConfig(payload.proxyConfig);
+        applyProxy(payload.proxyConfig);
+      }
+      if (payload.channelsConfig) writeChannelsConfig(payload.channelsConfig);
+      logger.info("data.imported");
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "导入配置失败" });
     }
   });
 

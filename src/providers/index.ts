@@ -6,6 +6,7 @@ import { CursorCliProvider } from "./cursor-cli.js";
 import { QoderCliProvider } from "./qoder-cli.js";
 import { ClaudeCodeProvider } from "./claude-code.js";
 import { resolveExecutable } from "../utils/process.js";
+import { getProviderRuntimeSettings } from "../app-settings.js";
 
 type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
 
@@ -29,35 +30,36 @@ function getClaudeCodeBin(): string | undefined {
 }
 
 export function getProviderConfig(type: string): Record<string, unknown> {
+  const settings = getProviderRuntimeSettings(normalizeProviderType(type));
   switch (normalizeProviderType(type)) {
     case "codex":
-      return dropUndefined({ bin: process.env.CODEX_BIN });
+      return dropUndefined({ bin: process.env.CODEX_BIN || settings.bin });
     case "gemini-cli":
       return dropUndefined({
-        bin: process.env.GEMINI_CLI_BIN,
-        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || "yolo",
+        bin: process.env.GEMINI_CLI_BIN || settings.bin,
+        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || settings.approvalMode || "yolo",
       });
     case "cursor-cli":
       return dropUndefined({
-        bin: process.env.CURSOR_CLI_BIN,
-        workspace: process.env.CURSOR_CLI_WORKSPACE,
-        apiKey: process.env.CURSOR_API_KEY,
+        bin: process.env.CURSOR_CLI_BIN || settings.bin,
+        workspace: process.env.CURSOR_CLI_WORKSPACE || settings.workspace,
+        apiKey: process.env.CURSOR_API_KEY || settings.apiKey,
       });
     case "qoder-cli":
       return dropUndefined({
-        bin: process.env.QODER_CLI_BIN,
+        bin: process.env.QODER_CLI_BIN || settings.bin,
         maxTurns: process.env.QODER_CLI_MAX_TURNS
           ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
-          : undefined,
+          : settings.maxTurns,
       });
     case "claude-code":
       return dropUndefined({
-        pathToClaudeCodeExecutable: getClaudeCodeBin(),
-        defaultModel: process.env.CLAUDE_AGENT_MODEL,
+        pathToClaudeCodeExecutable: getClaudeCodeBin() || settings.pathToClaudeCodeExecutable || settings.bin,
+        defaultModel: process.env.CLAUDE_AGENT_MODEL || settings.defaultModel,
         maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
           ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
-          : undefined,
-        permissionMode: process.env.CLAUDE_AGENT_PERMISSION_MODE,
+          : settings.maxTurns,
+        permissionMode: process.env.CLAUDE_AGENT_PERMISSION_MODE || settings.permissionMode,
       });
     default:
       return {};

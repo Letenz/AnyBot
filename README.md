@@ -25,7 +25,7 @@
 - **模型切换** — 在 Web UI 或聊天中通过 `/provider`、`/model` 命令随时切换 Provider 和模型
 - **聊天命令** — 所有频道统一支持 `/help`、`/new`、`/provider`、`/model` 命令
 - **后台运行** — 支持 daemon 模式，开机即用
-- **一键配置** — 交互式 `npm run setup` 引导完成所有配置，自动检测依赖、选择 Provider
+- **桌面安装包** — 支持 Electron 打包，普通用户安装后直接通过 Web UI 配置和使用
 
 ---
 
@@ -113,30 +113,20 @@ brew install node
 
 </details>
 
-### 2. 克隆与配置
+### 2. 源码运行
 
 ```bash
 git clone https://github.com/1935417243/AnyBot.git
 cd AnyBot
-npm run setup
+npm install
+npm start
 ```
 
-`npm run setup` 会引导你完成：
-- 检测操作系统与基础依赖（Node.js、npm）
-- **选择默认 Provider**（Codex CLI / Gemini CLI / Cursor CLI / Qoder CLI / Claude Code）
-- 检测对应 CLI 或 SDK 配置，并提供安装指引
-- 设置工作目录
-- 配置安全模式（Codex/Claude: Sandbox 模式 / Gemini: Approval Mode）
-- 配置 Web UI 端口
-- 生成 `.env` 配置文件（包含所有 Provider 的配置）
-- 安装 npm 依赖
+启动后打开 `http://localhost:19981` 即可使用 Web UI。Provider、模型、权限、代理和频道都在 Web UI 中配置。
 
-### 3. 启动
+### 3. 后台运行
 
 ```bash
-# 前台运行
-npm start
-
 # 后台运行（daemon）
 npm run bot:start
 
@@ -145,19 +135,6 @@ npm run bot:status
 
 # 停止
 npm run bot:stop
-```
-
-启动后打开 `http://localhost:19981` 即可使用 Web UI。
-
-### 4. 手动配置（可选）
-
-如果不想使用引导脚本：
-
-```bash
-cp .env.example .env
-# 编辑 .env，设置 PROVIDER 和对应 CLI 的配置
-npm install
-npm start
 ```
 
 ---
@@ -449,7 +426,7 @@ AnyBot 已在代码层面做了处理——在 Linux 上会自动以 `--sandbox 
 
 ## 环境变量
 
-在 `.env` 文件中配置（通过 `npm run setup` 生成或手动从 `.env.example` 复制）。
+AnyBot 不再读取 `.env` 文件。Provider、模型和权限等常用设置会保存到 `.data/*.json`，也可以在 Web UI 中修改。下面这些变量只作为系统环境变量兼容入口使用，需要时直接在启动命令或系统服务配置里传入。
 
 ### 通用配置
 
@@ -614,10 +591,7 @@ AnyBot/
 │           └── PROFILE.md  # Agent 身份与用户档案
 ├── scripts/                # 跨平台辅助脚本
 │   ├── bot.mjs             # daemon 控制脚本
-│   ├── setup.mjs           # 交互式配置引导
 │   └── claude-deepseek-wrapper.sh
-├── setup.sh                # macOS/Linux 旧版配置引导（可选）
-├── .env.example            # 环境变量模板
 └── package.json
 ```
 

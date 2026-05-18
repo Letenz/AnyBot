@@ -55,8 +55,14 @@
         const settingsBtn = document.getElementById('settings-btn');
         const settingsOverlay = document.getElementById('settings-overlay');
         const settingsCloseBtn = document.getElementById('settings-close-btn');
+        const settingsTopCloseBtn = document.getElementById('settings-top-close-btn');
         const settingsCancelBtn = document.getElementById('settings-cancel-btn');
         const settingsSaveBtn = document.getElementById('settings-save-btn');
+        const settingsSaveStatus = document.getElementById('settings-save-status');
+        const settingsTitle = document.getElementById('settings-title');
+        const settingsSubtitle = document.getElementById('settings-subtitle');
+        const settingsNavItems = Array.prototype.slice.call(document.querySelectorAll('.settings-nav-item'));
+        const settingsTabPanels = Array.prototype.slice.call(document.querySelectorAll('.settings-tab-panel'));
         const settingsProviderSelect = document.getElementById('settings-provider-select');
         const settingsProviderCombobox = document.getElementById('settings-provider-combobox');
         const settingsProviderTrigger = document.getElementById('settings-provider-trigger');
@@ -64,6 +70,30 @@
         const settingsProviderMenu = document.getElementById('settings-provider-menu');
         const settingsThemeGroup = document.getElementById('settings-theme-group');
         const settingsSandboxGroup = document.getElementById('settings-sandbox-group');
+        const settingsLanguageSelect = document.getElementById('settings-language-select');
+        const settingsOpenLogin = document.getElementById('settings-open-login');
+        const settingsOpenWindow = document.getElementById('settings-open-window');
+        const settingsWebPort = document.getElementById('settings-web-port');
+        const settingsProviderModelSelect = document.getElementById('settings-provider-model-select');
+        const settingsProviderStatus = document.getElementById('settings-provider-status');
+        const settingsProviderBinFields = document.getElementById('settings-provider-bin-fields');
+        const settingsProviderExtraFields = document.getElementById('settings-provider-extra-fields');
+        const settingsProviderDetectBtn = document.getElementById('settings-provider-detect-btn');
+        const settingsDangerConfirm = document.getElementById('settings-danger-confirm');
+        const settingsDefaultWorkdir = document.getElementById('settings-default-workdir');
+        const settingsWorkdirPickBtn = document.getElementById('settings-workdir-pick-btn');
+        const settingsProjectsEntryBtn = document.getElementById('settings-projects-entry-btn');
+        const settingsLogLevel = document.getElementById('settings-log-level');
+        const settingsLogContent = document.getElementById('settings-log-content');
+        const settingsLogPrompt = document.getElementById('settings-log-prompt');
+        const settingsOpenLogsBtn = document.getElementById('settings-open-logs-btn');
+        const settingsClearLogsBtn = document.getElementById('settings-clear-logs-btn');
+        const settingsOpenDataBtn = document.getElementById('settings-open-data-btn');
+        const settingsClearUploadsBtn = document.getElementById('settings-clear-uploads-btn');
+        const settingsExportDataBtn = document.getElementById('settings-export-data-btn');
+        const settingsImportDataBtn = document.getElementById('settings-import-data-btn');
+        const settingsImportFile = document.getElementById('settings-import-file');
+        const settingsClearHistoryBtn = document.getElementById('settings-clear-history-btn');
         const contextUsageEl = document.getElementById('context-usage');
         const contextUsageRingEl = document.getElementById('context-usage-ring');
         const contextUsagePercentEl = document.getElementById('context-usage-percent');
@@ -80,7 +110,11 @@
         let modelConfig = null;
         let providerData = null;
         let sandboxConfig = null;
+        let appSettingsPayload = null;
+        let appSettings = null;
+        let settingsModelConfig = null;
         let selectedSandbox = null;
+        let activeSettingsTab = 'general';
         let latestContextUsage = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
@@ -156,7 +190,9 @@
             settingsThemeGroup.addEventListener('click', function (e) {
                 var button = e.target.closest('.theme-option');
                 if (!button || !settingsThemeGroup.contains(button)) return;
-                setTheme(button.dataset.themeValue);
+                var theme = button.dataset.themeValue;
+                setTheme(theme);
+                persistAppSettingsPatch({general: {theme: theme}}, '已保存');
             });
         }
 
@@ -1480,6 +1516,257 @@
             modelBadge.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         });
 
+        const SETTINGS_TAB_META = {
+            general: ['常规', '外观主题和默认权限'],
+            provider: ['提供商', '提供商配置'],
+            workspace: ['工作区', '默认工作目录和项目入口'],
+            privacy: ['隐私与日志', '日志目录和清理操作'],
+        };
+
+        function createDefaultAppSettings() {
+            return {
+                general: {
+                    theme: 'system',
+                    language: 'auto',
+                    openAtLogin: false,
+                    openWindowOnStart: true,
+                    webPort: 19981,
+                },
+                providers: {},
+                workspace: {
+                    defaultWorkdir: '',
+                },
+                permissions: {
+                    requireDangerousConfirmation: true,
+                },
+                privacy: {
+                    logLevel: 'info',
+                    logIncludeContent: false,
+                    logIncludePrompt: false,
+                },
+            };
+        }
+
+        function mergeAppSettings(raw) {
+            var base = createDefaultAppSettings();
+            raw = raw || {};
+            return {
+                general: Object.assign({}, base.general, raw.general || {}),
+                providers: Object.assign({}, base.providers, raw.providers || {}),
+                workspace: Object.assign({}, base.workspace, raw.workspace || {}),
+                permissions: Object.assign({}, base.permissions, raw.permissions || {}),
+                privacy: Object.assign({}, base.privacy, raw.privacy || {}),
+            };
+        }
+
+        function showSettingsStatus(message, tone) {
+            if (!settingsSaveStatus) return;
+            settingsSaveStatus.textContent = message || '';
+            settingsSaveStatus.style.color = tone === 'error' ? '#fb7185' : '';
+            clearTimeout(settingsSaveStatus._timer);
+            if (message) {
+                settingsSaveStatus._timer = setTimeout(function () {
+                    settingsSaveStatus.textContent = '';
+                    settingsSaveStatus.style.color = '';
+                }, 2600);
+            }
+        }
+
+        async function persistAppSettingsPatch(patch, successMessage) {
+            try {
+                var res = await fetch('/api/app-settings', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(patch),
+                });
+                if (!res.ok) {
+                    var err = await res.json().catch(function () { return {}; });
+                    showError(err.error || '保存设置失败');
+                    return false;
+                }
+                appSettingsPayload = await res.json();
+                appSettings = mergeAppSettings(appSettingsPayload.settings);
+                showSettingsStatus(successMessage || '已保存');
+                return true;
+            } catch (e) {
+                showError('保存设置失败');
+                return false;
+            }
+        }
+
+        async function fetchAppSettings() {
+            try {
+                var res = await fetch('/api/app-settings');
+                appSettingsPayload = await res.json();
+                appSettings = mergeAppSettings(appSettingsPayload.settings);
+                renderAppSettings();
+            } catch (e) {
+                console.error('Failed to fetch app settings:', e);
+                appSettings = createDefaultAppSettings();
+                renderAppSettings();
+            }
+        }
+
+        function renderAppSettings() {
+            if (!appSettings) return;
+            setTheme(appSettings.general.theme || currentThemeSetting || 'system');
+            if (settingsDefaultWorkdir) {
+                settingsDefaultWorkdir.value =
+                    appSettings.workspace.defaultWorkdir ||
+                    (appSettingsPayload && appSettingsPayload.effective && appSettingsPayload.effective.workdir) ||
+                    '';
+            }
+            renderSettingsProviderDetails();
+        }
+
+        function setSettingsTab(tab) {
+            if (!SETTINGS_TAB_META[tab]) tab = 'general';
+            activeSettingsTab = tab;
+            settingsNavItems.forEach(function (item) {
+                var active = item.dataset.settingsTab === tab;
+                item.classList.toggle('active', active);
+                item.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+            settingsTabPanels.forEach(function (panel) {
+                panel.classList.toggle('active', panel.dataset.settingsPanel === tab);
+            });
+            if (settingsTitle) settingsTitle.textContent = SETTINGS_TAB_META[tab][0];
+            if (settingsSubtitle) settingsSubtitle.textContent = SETTINGS_TAB_META[tab][1];
+        }
+
+        settingsNavItems.forEach(function (item) {
+            item.addEventListener('click', function () {
+                setSettingsTab(item.dataset.settingsTab);
+            });
+        });
+
+        function getSelectedSettingsProvider() {
+            if (!providerData || !settingsProviderSelect) return null;
+            return providerData.providers.find(function (p) {
+                return p.type === settingsProviderSelect.value;
+            }) || null;
+        }
+
+        async function fetchSettingsModelConfig(providerType) {
+            if (!providerType || !settingsProviderModelSelect) return;
+            try {
+                var res = await fetch('/api/model-config?provider=' + encodeURIComponent(providerType));
+                if (!res.ok) return;
+                settingsModelConfig = await res.json();
+                renderSettingsModelSelect();
+            } catch (e) {
+                console.error('Failed to fetch settings model config:', e);
+            }
+        }
+
+        function renderSettingsModelSelect() {
+            if (!settingsProviderModelSelect) return;
+            settingsProviderModelSelect.innerHTML = '';
+            if (!settingsModelConfig || !Array.isArray(settingsModelConfig.models)) {
+                settingsProviderModelSelect.disabled = true;
+                return;
+            }
+            settingsProviderModelSelect.disabled = false;
+            settingsModelConfig.models.forEach(function (model) {
+                var option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.name || model.id;
+                settingsProviderModelSelect.appendChild(option);
+            });
+            settingsProviderModelSelect.value = settingsModelConfig.currentModel || settingsProviderModelSelect.value;
+        }
+
+        function getProviderSettings(providerType) {
+            if (!appSettings) appSettings = createDefaultAppSettings();
+            if (!appSettings.providers) appSettings.providers = {};
+            if (!appSettings.providers[providerType]) appSettings.providers[providerType] = {};
+            return appSettings.providers[providerType];
+        }
+
+        function renderSettingsProviderDetails() {
+            var provider = getSelectedSettingsProvider();
+            if (!provider || !appSettings) return;
+            var cfg = getProviderSettings(provider.type);
+            if (settingsProviderStatus) {
+                settingsProviderStatus.className = 'provider-status ' + (provider.installed === false ? 'warn' : 'ok');
+                settingsProviderStatus.textContent = provider.installed === false
+                    ? '未检测到 ' + (provider.bin || provider.displayName) + '。' + (provider.installHint || '')
+                    : '已检测到：' + (provider.executablePath || provider.bin || provider.displayName);
+            }
+            if (settingsProviderBinFields) {
+                var binValue = cfg.bin || cfg.pathToClaudeCodeExecutable || '';
+                settingsProviderBinFields.innerHTML =
+                    '<label class="settings-row">' +
+                    '<span><strong>CLI 路径</strong><small>留空时使用默认命令或内置运行时</small></span>' +
+                    '<input class="settings-inline-input" id="settings-provider-bin-input" type="text" value="' + escapeHtml(binValue) + '" placeholder="' + escapeHtml(provider.bin || provider.type) + '" spellcheck="false">' +
+                    '</label>';
+            }
+            if (settingsProviderExtraFields) {
+                settingsProviderExtraFields.innerHTML = buildProviderExtraFields(provider.type, cfg);
+            }
+            fetchSettingsModelConfig(provider.type);
+        }
+
+        function buildProviderExtraFields(providerType, cfg) {
+            if (providerType === 'gemini-cli') {
+                var approval = cfg.approvalMode || 'yolo';
+                return '<label class="settings-row"><span><strong>Approval Mode</strong><small>Gemini CLI 操作审批方式</small></span>' +
+                    '<select class="settings-inline-select" id="settings-provider-approval">' +
+                    '<option value="yolo"' + (approval === 'yolo' ? ' selected' : '') + '>yolo</option>' +
+                    '<option value="auto-edit"' + (approval === 'auto-edit' ? ' selected' : '') + '>auto-edit</option>' +
+                    '<option value="confirm"' + (approval === 'confirm' ? ' selected' : '') + '>confirm</option>' +
+                    '</select></label>';
+            }
+            if (providerType === 'cursor-cli') {
+                return '<label class="settings-row"><span><strong>Workspace</strong><small>Cursor CLI 默认 workspace</small></span>' +
+                    '<input class="settings-inline-input" id="settings-provider-workspace" value="' + escapeHtml(cfg.workspace || '') + '" spellcheck="false"></label>' +
+                    '<label class="settings-row"><span><strong>API Key</strong><small>仅在需要 Cursor API Key 时填写</small></span>' +
+                    '<input class="settings-inline-input" id="settings-provider-api-key" type="password" value="' + escapeHtml(cfg.apiKey || '') + '"></label>';
+            }
+            if (providerType === 'qoder-cli') {
+                return '<label class="settings-row"><span><strong>Max Turns</strong><small>Qoder CLI 最大轮数</small></span>' +
+                    '<input class="settings-inline-input short" id="settings-provider-max-turns" type="number" min="1" value="' + escapeHtml(String(cfg.maxTurns || '')) + '"></label>';
+            }
+            if (providerType === 'claude-code') {
+                var permission = cfg.permissionMode || '';
+                return '<label class="settings-row"><span><strong>Max Turns</strong><small>Claude Code 最大轮数</small></span>' +
+                    '<input class="settings-inline-input short" id="settings-provider-max-turns" type="number" min="1" value="' + escapeHtml(String(cfg.maxTurns || '')) + '"></label>' +
+                    '<label class="settings-row"><span><strong>Permission Mode</strong><small>留空则按默认 Sandbox 映射</small></span>' +
+                    '<select class="settings-inline-select" id="settings-provider-permission">' +
+                    '<option value=""' + (!permission ? ' selected' : '') + '>自动</option>' +
+                    '<option value="default"' + (permission === 'default' ? ' selected' : '') + '>default</option>' +
+                    '<option value="acceptEdits"' + (permission === 'acceptEdits' ? ' selected' : '') + '>acceptEdits</option>' +
+                    '<option value="bypassPermissions"' + (permission === 'bypassPermissions' ? ' selected' : '') + '>bypassPermissions</option>' +
+                    '</select></label>';
+            }
+            return '<div class="provider-status">当前提供商没有额外参数。</div>';
+        }
+
+        function collectProviderSettings(providerType) {
+            var current = getProviderSettings(providerType);
+            var next = Object.assign({}, current);
+            var binInput = document.getElementById('settings-provider-bin-input');
+            var approvalInput = document.getElementById('settings-provider-approval');
+            var workspaceInput = document.getElementById('settings-provider-workspace');
+            var apiKeyInput = document.getElementById('settings-provider-api-key');
+            var maxTurnsInput = document.getElementById('settings-provider-max-turns');
+            var permissionInput = document.getElementById('settings-provider-permission');
+            if (binInput) next.bin = binInput.value.trim();
+            if (approvalInput) next.approvalMode = approvalInput.value;
+            if (workspaceInput) next.workspace = workspaceInput.value.trim();
+            if (apiKeyInput) next.apiKey = apiKeyInput.value;
+            if (maxTurnsInput) {
+                var maxTurns = parseInt(maxTurnsInput.value, 10);
+                if (Number.isFinite(maxTurns) && maxTurns > 0) next.maxTurns = maxTurns;
+                else delete next.maxTurns;
+            }
+            if (permissionInput) next.permissionMode = permissionInput.value;
+            Object.keys(next).forEach(function (key) {
+                if (next[key] === '') delete next[key];
+            });
+            return next;
+        }
+
         if (settingsProviderTrigger) {
             settingsProviderTrigger.addEventListener('click', function (e) {
                 e.stopPropagation();
@@ -1545,8 +1832,11 @@
                 button.innerHTML =
                     '<span class="sandbox-option-name">' + escapeHtml(mode.name) + '</span>' +
                     '<span class="sandbox-option-desc">' + escapeHtml(mode.description) + '</span>';
-                button.addEventListener('click', function () {
-                    setSettingsSandboxValue(mode.id);
+                button.addEventListener('click', async function () {
+                    if (setSettingsSandboxValue(mode.id)) {
+                        await persistSandboxConfig();
+                        showSettingsStatus('已保存');
+                    }
                 });
                 settingsSandboxGroup.appendChild(button);
             });
@@ -1609,8 +1899,8 @@
                     var item = document.createElement('button');
                     item.className = 'settings-combobox-option';
                     item.type = 'button';
-                    item.disabled = !isInstalled;
                     item.setAttribute('role', 'option');
+                    item.disabled = !isInstalled;
                     item.setAttribute('aria-disabled', isInstalled ? 'false' : 'true');
                     if (!isInstalled) item.title = (p.bin || p.displayName) + ' 未安装';
                     item.dataset.providerType = p.type;
@@ -1618,11 +1908,12 @@
                     item.dataset.providerInstalled = isInstalled ? 'true' : 'false';
                     item.dataset.providerBin = p.bin || '';
                     item.innerHTML = buildSettingsProviderOptionHtml(false, p.displayName, !isInstalled);
-                    item.addEventListener('click', function (e) {
+                    item.addEventListener('click', async function (e) {
                         e.stopPropagation();
                         if (setSettingsProviderValue(p.type)) {
                             setSettingsProviderMenuOpen(false);
                             settingsProviderTrigger.focus();
+                            await persistSettingsProviderSelection(p.type);
                         }
                     });
                     item.addEventListener('keydown', handleSettingsProviderOptionKeydown);
@@ -1631,6 +1922,7 @@
             });
             settingsProviderSelect.value = providerData.current;
             updateSettingsProviderDisplay();
+            renderSettingsProviderDetails();
         }
 
         function isProviderInstalled(provider) {
@@ -1659,9 +1951,7 @@
             if (!settingsProviderMenu) return [];
             var options = Array.prototype.slice.call(settingsProviderMenu.querySelectorAll('.settings-combobox-option'));
             if (includeDisabled) return options;
-            return options.filter(function (item) {
-                return item.dataset.providerInstalled !== 'false' && !item.disabled;
-            });
+            return options.filter(function (item) { return !item.disabled; });
         }
 
         function updateSettingsProviderDisplay() {
@@ -1679,6 +1969,8 @@
                 var isDisabled = item.dataset.providerInstalled === 'false';
                 item.classList.toggle('active', isActive);
                 item.classList.toggle('disabled', isDisabled);
+                item.disabled = isDisabled;
+                item.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
                 item.setAttribute('aria-selected', isActive ? 'true' : 'false');
                 item.innerHTML = buildSettingsProviderOptionHtml(
                     isActive,
@@ -1691,11 +1983,12 @@
         function setSettingsProviderValue(providerType) {
             if (!settingsProviderSelect) return false;
             if (!isSettingsProviderSelectable(providerType)) {
-                showError('该 Provider 未安装，无法选择');
+                showError('该提供商未安装，无法选择');
                 return false;
             }
             settingsProviderSelect.value = providerType;
             updateSettingsProviderDisplay();
+            renderSettingsProviderDetails();
             return true;
         }
 
@@ -1737,9 +2030,11 @@
                 if (last) last.focus();
             } else if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                if (setSettingsProviderValue(e.currentTarget.dataset.providerType)) {
+                var providerType = e.currentTarget.dataset.providerType;
+                if (setSettingsProviderValue(providerType)) {
                     setSettingsProviderMenuOpen(false);
                     settingsProviderTrigger.focus();
+                    persistSettingsProviderSelection(providerType);
                 }
             } else if (e.key === 'Escape') {
                 e.preventDefault();
@@ -1749,6 +2044,8 @@
         }
 
         function openSettingsPanel() {
+            setSettingsTab(activeSettingsTab || 'general');
+            if (appSettings) renderAppSettings();
             if (providerData) renderProviderSelect();
             if (sandboxConfig) {
                 selectedSandbox = sandboxConfig.defaultSandbox;
@@ -1760,7 +2057,8 @@
             modelSwitcher.classList.remove('open');
             modelBadge.setAttribute('aria-expanded', 'false');
             requestAnimationFrame(function () {
-                if (settingsProviderTrigger) settingsProviderTrigger.focus();
+                var activeNav = document.querySelector('.settings-nav-item.active');
+                if (activeNav) activeNav.focus();
             });
         }
 
@@ -1771,37 +2069,61 @@
             settingsBtn.classList.remove('active');
         }
 
-        async function saveSettings() {
-            if (!providerData || !settingsProviderSelect) return;
-            if (!isSettingsProviderSelectable(settingsProviderSelect.value)) {
-                showError('该 Provider 未安装，无法保存');
-                return;
-            }
-            var originalText = settingsSaveBtn.textContent;
-            settingsSaveBtn.disabled = true;
-            settingsSaveBtn.textContent = '保存中…';
+        var workdirSaveTimer = null;
+
+        function scheduleDefaultWorkdirSave() {
+            if (!settingsDefaultWorkdir) return;
+            clearTimeout(workdirSaveTimer);
+            workdirSaveTimer = setTimeout(function () {
+                persistDefaultWorkdir();
+            }, 600);
+        }
+
+        async function persistDefaultWorkdir() {
+            if (!settingsDefaultWorkdir) return false;
+            return persistAppSettingsPatch({
+                workspace: {
+                    defaultWorkdir: settingsDefaultWorkdir.value.trim(),
+                },
+            }, '已保存');
+        }
+
+        async function persistSettingsProviderSelection(providerType) {
+            if (!providerType || !isSettingsProviderSelectable(providerType)) return false;
+            var saved = await switchProviderTo(providerType, { closeOnSuccess: false });
+            if (saved) showSettingsStatus('已保存');
+            return saved;
+        }
+
+        async function saveSettingsProviderModel(providerType, modelId) {
             try {
-                var sandboxSaved = await persistSandboxConfig();
-                if (!sandboxSaved) return;
-                var providerSaved = await switchProviderTo(settingsProviderSelect.value, { closeOnSuccess: false });
-                if (!providerSaved) return;
-                closeSettingsPanel();
-            } finally {
-                settingsSaveBtn.disabled = false;
-                settingsSaveBtn.textContent = originalText;
+                var res = await fetch('/api/model-config', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({provider: providerType, modelId: modelId}),
+                });
+                if (res.ok && (!currentSessionProvider || currentSessionProvider === providerType)) {
+                    modelConfig = await res.json();
+                    updateModelBadgeLabel();
+                    renderModelDropdown();
+                }
+            } catch (e) {
+                showError('保存默认模型失败');
             }
         }
 
         async function switchProviderTo(providerType, opts) {
-            if (!providerData || providerType === providerData.current) {
+            if (!providerData || (providerType === providerData.current && !(opts && opts.force))) {
                 if (opts && opts.closeOnSuccess) closeSettingsPanel();
                 return true;
             }
             var shouldClose = !!(opts && opts.closeOnSuccess);
-            var originalText = settingsSaveBtn.textContent;
+            var originalText = settingsSaveBtn ? settingsSaveBtn.textContent : '';
             if (shouldClose) {
-                settingsSaveBtn.disabled = true;
-                settingsSaveBtn.textContent = '保存中…';
+                if (settingsSaveBtn) {
+                    settingsSaveBtn.disabled = true;
+                    settingsSaveBtn.textContent = '保存中…';
+                }
             }
             try {
                 var res = await fetch('/api/providers/current', {
@@ -1830,7 +2152,7 @@
                 showError('切换 Provider 失败');
                 return false;
             } finally {
-                if (shouldClose) {
+                if (shouldClose && settingsSaveBtn) {
                     settingsSaveBtn.disabled = false;
                     settingsSaveBtn.textContent = originalText;
                 }
@@ -1843,8 +2165,103 @@
         });
 
         settingsCloseBtn.addEventListener('click', closeSettingsPanel);
-        settingsCancelBtn.addEventListener('click', closeSettingsPanel);
-        settingsSaveBtn.addEventListener('click', saveSettings);
+        if (settingsTopCloseBtn) settingsTopCloseBtn.addEventListener('click', closeSettingsPanel);
+        if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', closeSettingsPanel);
+        if (settingsProviderDetectBtn) {
+            settingsProviderDetectBtn.addEventListener('click', async function () {
+                await fetchProviders();
+                renderSettingsProviderDetails();
+                showSettingsStatus('检测完成');
+            });
+        }
+        if (settingsWorkdirPickBtn) {
+            settingsWorkdirPickBtn.addEventListener('click', async function () {
+                try {
+                    var res = await fetch('/api/app-settings/default-workdir/pick', { method: 'POST' });
+                    var data = await res.json();
+                    if (data.path && settingsDefaultWorkdir) {
+                        settingsDefaultWorkdir.value = data.path;
+                        await persistDefaultWorkdir();
+                    }
+                } catch (e) {
+                    showError('选择目录失败');
+                }
+            });
+        }
+        if (settingsDefaultWorkdir) {
+            settingsDefaultWorkdir.addEventListener('input', scheduleDefaultWorkdirSave);
+            settingsDefaultWorkdir.addEventListener('change', persistDefaultWorkdir);
+        }
+        if (settingsProjectsEntryBtn) {
+            settingsProjectsEntryBtn.addEventListener('click', function () {
+                closeSettingsPanel();
+                isProjectsCollapsed = false;
+                localStorage.setItem('projectsCollapsed', 'false');
+                updateProjectsCollapsedState();
+                if (addProjectBtn) addProjectBtn.focus();
+            });
+        }
+        if (settingsOpenLogsBtn) settingsOpenLogsBtn.addEventListener('click', function () { runSettingsAction('/api/logs/open', 'POST', '已打开日志目录'); });
+        if (settingsClearLogsBtn) settingsClearLogsBtn.addEventListener('click', function () {
+            if (confirm('确认清空日志？')) runSettingsAction('/api/logs', 'DELETE', '日志已清空');
+        });
+        if (settingsOpenDataBtn) settingsOpenDataBtn.addEventListener('click', function () { runSettingsAction('/api/data/open', 'POST', '已打开数据目录'); });
+        if (settingsClearUploadsBtn) settingsClearUploadsBtn.addEventListener('click', function () {
+            if (confirm('确认清理上传临时文件？')) runSettingsAction('/api/data/uploads', 'DELETE', '上传文件已清理');
+        });
+        if (settingsClearHistoryBtn) settingsClearHistoryBtn.addEventListener('click', async function () {
+            if (!confirm('确认清空所有聊天历史？此操作不可撤销。')) return;
+            await runSettingsAction('/api/data/history', 'DELETE', '聊天历史已清空');
+            await fetchSessions();
+            await createNewChat(null, { force: true });
+        });
+        if (settingsExportDataBtn) settingsExportDataBtn.addEventListener('click', function () {
+            window.location.href = '/api/data/export';
+        });
+        if (settingsImportDataBtn && settingsImportFile) {
+            settingsImportDataBtn.addEventListener('click', function () { settingsImportFile.click(); });
+            settingsImportFile.addEventListener('change', importSettingsFile);
+        }
+
+        async function runSettingsAction(url, method, successMessage) {
+            try {
+                var res = await fetch(url, { method: method });
+                if (!res.ok) {
+                    var err = await res.json().catch(function () { return {}; });
+                    showError(err.error || '操作失败');
+                    return false;
+                }
+                showSettingsStatus(successMessage || '已完成');
+                return true;
+            } catch (e) {
+                showError('操作失败');
+                return false;
+            }
+        }
+
+        async function importSettingsFile() {
+            var file = settingsImportFile.files && settingsImportFile.files[0];
+            settingsImportFile.value = '';
+            if (!file) return;
+            try {
+                var text = await file.text();
+                var payload = JSON.parse(text);
+                var res = await fetch('/api/data/import', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                });
+                if (!res.ok) {
+                    var err = await res.json().catch(function () { return {}; });
+                    showError(err.error || '导入失败');
+                    return;
+                }
+                await Promise.all([fetchAppSettings(), fetchProviders(), fetchSandboxConfig(), fetchModelConfig()]);
+                showSettingsStatus('导入完成');
+            } catch (e) {
+                showError('导入失败，请确认文件格式');
+            }
+        }
 
         settingsOverlay.addEventListener('click', function (e) {
             if (e.target === settingsOverlay) closeSettingsPanel();
@@ -2852,7 +3269,7 @@
         async function init() {
             updateProjectsCollapsedState();
             updateHistoryCollapsedState();
-            await Promise.all([fetchProjects(), fetchSessions(), fetchModelConfig(), fetchProviders(), fetchSandboxConfig(), fetchProxyConfig()]);
+            await Promise.all([fetchProjects(), fetchSessions(), fetchModelConfig(), fetchProviders(), fetchSandboxConfig(), fetchAppSettings(), fetchProxyConfig()]);
             if (sessions.length > 0) {
                 await loadSession(sessions[0].id);
             } else {

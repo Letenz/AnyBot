@@ -106,7 +106,7 @@ export async function startAllChannels(
   return channelManager.startAll(callbacks);
 }
 
-export { readChannelsConfig, readChannelConfig, updateChannelConfig } from "./config.js";
+export { readChannelsConfig, readChannelConfig, writeChannelsConfig, updateChannelConfig } from "./config.js";
 export type {
   IChannel,
   ChannelCallbacks,

@@ -1,0 +1,205 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.resolve(__dirname, "../.data");
+const CONFIG_PATH = path.join(dataDir, "app-settings.json");
+
+export type AppLanguage = "auto" | "zh" | "en";
+export type AppLogLevel = "debug" | "info" | "warn" | "error";
+export type AppTheme = "light" | "dark" | "system";
+
+export interface ProviderRuntimeSettings {
+  bin?: string;
+  approvalMode?: string;
+  maxTurns?: number;
+  workspace?: string;
+  apiKey?: string;
+  permissionMode?: string;
+  defaultModel?: string;
+  pathToClaudeCodeExecutable?: string;
+}
+
+export interface AppSettings {
+  general: {
+    theme: AppTheme;
+    language: AppLanguage;
+    openAtLogin: boolean;
+    openWindowOnStart: boolean;
+    webPort: number;
+  };
+  providers: Record<string, ProviderRuntimeSettings>;
+  workspace: {
+    defaultWorkdir: string;
+  };
+  permissions: {
+    requireDangerousConfirmation: boolean;
+  };
+  privacy: {
+    logLevel: AppLogLevel;
+    logIncludeContent: boolean;
+    logIncludePrompt: boolean;
+  };
+}
+
+const DEFAULT_SETTINGS: AppSettings = {
+  general: {
+    theme: "system",
+    language: "auto",
+    openAtLogin: false,
+    openWindowOnStart: true,
+    webPort: 19981,
+  },
+  providers: {},
+  workspace: {
+    defaultWorkdir: process.cwd(),
+  },
+  permissions: {
+    requireDangerousConfirmation: true,
+  },
+  privacy: {
+    logLevel: "info",
+    logIncludeContent: false,
+    logIncludePrompt: false,
+  },
+};
+
+function ensureConfig(): void {
+  mkdirSync(dataDir, { recursive: true });
+  if (!existsSync(CONFIG_PATH)) {
+    writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2), "utf-8");
+  }
+}
+
+function isLanguage(value: unknown): value is AppLanguage {
+  return value === "auto" || value === "zh" || value === "en";
+}
+
+function isLogLevel(value: unknown): value is AppLogLevel {
+  return value === "debug" || value === "info" || value === "warn" || value === "error";
+}
+
+function isTheme(value: unknown): value is AppTheme {
+  return value === "light" || value === "dark" || value === "system";
+}
+
+function normalizeProviderSettings(value: unknown): ProviderRuntimeSettings {
+  if (!value || typeof value !== "object") return {};
+  const raw = value as Record<string, unknown>;
+  const settings: ProviderRuntimeSettings = {};
+  if (typeof raw.bin === "string") settings.bin = raw.bin;
+  if (typeof raw.approvalMode === "string") settings.approvalMode = raw.approvalMode;
+  if (typeof raw.workspace === "string") settings.workspace = raw.workspace;
+  if (typeof raw.apiKey === "string") settings.apiKey = raw.apiKey;
+  if (typeof raw.permissionMode === "string") settings.permissionMode = raw.permissionMode;
+  if (typeof raw.defaultModel === "string") settings.defaultModel = raw.defaultModel;
+  if (typeof raw.pathToClaudeCodeExecutable === "string") {
+    settings.pathToClaudeCodeExecutable = raw.pathToClaudeCodeExecutable;
+  }
+  if (typeof raw.maxTurns === "number" && Number.isFinite(raw.maxTurns) && raw.maxTurns > 0) {
+    settings.maxTurns = Math.floor(raw.maxTurns);
+  }
+  return settings;
+}
+
+function mergeSettings(value: unknown): AppSettings {
+  const raw = (value && typeof value === "object" ? value : {}) as Partial<AppSettings>;
+  const general = (raw.general || {}) as Partial<AppSettings["general"]>;
+  const workspace = (raw.workspace || {}) as Partial<AppSettings["workspace"]>;
+  const permissions = (raw.permissions || {}) as Partial<AppSettings["permissions"]>;
+  const privacy = (raw.privacy || {}) as Partial<AppSettings["privacy"]>;
+  const providers = raw.providers && typeof raw.providers === "object" ? raw.providers : {};
+
+  return {
+    general: {
+      theme: isTheme(general.theme) ? general.theme : DEFAULT_SETTINGS.general.theme,
+      language: isLanguage(general.language) ? general.language : DEFAULT_SETTINGS.general.language,
+      openAtLogin: typeof general.openAtLogin === "boolean" ? general.openAtLogin : DEFAULT_SETTINGS.general.openAtLogin,
+      openWindowOnStart:
+        typeof general.openWindowOnStart === "boolean"
+          ? general.openWindowOnStart
+          : DEFAULT_SETTINGS.general.openWindowOnStart,
+      webPort:
+        typeof general.webPort === "number" && Number.isFinite(general.webPort) && general.webPort > 0
+          ? Math.floor(general.webPort)
+          : DEFAULT_SETTINGS.general.webPort,
+    },
+    providers: Object.fromEntries(
+      Object.entries(providers).map(([provider, config]) => [provider, normalizeProviderSettings(config)]),
+    ),
+    workspace: {
+      defaultWorkdir:
+        typeof workspace.defaultWorkdir === "string" && workspace.defaultWorkdir.trim()
+          ? path.resolve(workspace.defaultWorkdir.trim())
+          : DEFAULT_SETTINGS.workspace.defaultWorkdir,
+    },
+    permissions: {
+      requireDangerousConfirmation:
+        typeof permissions.requireDangerousConfirmation === "boolean"
+          ? permissions.requireDangerousConfirmation
+          : DEFAULT_SETTINGS.permissions.requireDangerousConfirmation,
+    },
+    privacy: {
+      logLevel: isLogLevel(privacy.logLevel) ? privacy.logLevel : DEFAULT_SETTINGS.privacy.logLevel,
+      logIncludeContent:
+        typeof privacy.logIncludeContent === "boolean"
+          ? privacy.logIncludeContent
+          : DEFAULT_SETTINGS.privacy.logIncludeContent,
+      logIncludePrompt:
+        typeof privacy.logIncludePrompt === "boolean"
+          ? privacy.logIncludePrompt
+          : DEFAULT_SETTINGS.privacy.logIncludePrompt,
+    },
+  };
+}
+
+export function getDataDir(): string {
+  return dataDir;
+}
+
+export function readAppSettings(): AppSettings {
+  ensureConfig();
+  try {
+    const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+    const settings = mergeSettings(raw);
+    writeFileSync(CONFIG_PATH, JSON.stringify(settings, null, 2), "utf-8");
+    return settings;
+  } catch {
+    writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2), "utf-8");
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export function writeAppSettings(settings: AppSettings): AppSettings {
+  const next = mergeSettings(settings);
+  ensureConfig();
+  writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), "utf-8");
+  return next;
+}
+
+export function updateAppSettings(partial: Partial<AppSettings>): AppSettings {
+  const current = readAppSettings();
+  return writeAppSettings(mergeSettings({
+    ...current,
+    ...partial,
+    general: { ...current.general, ...(partial.general || {}) },
+    providers: { ...current.providers, ...(partial.providers || {}) },
+    workspace: { ...current.workspace, ...(partial.workspace || {}) },
+    permissions: { ...current.permissions, ...(partial.permissions || {}) },
+    privacy: { ...current.privacy, ...(partial.privacy || {}) },
+  }));
+}
+
+export function getProviderRuntimeSettings(providerType: string): ProviderRuntimeSettings {
+  return readAppSettings().providers[providerType] || {};
+}
+
+export function getConfiguredWebPort(): number {
+  const raw = process.env.WEB_PORT;
+  if (raw) {
+    const port = Number.parseInt(raw, 10);
+    if (Number.isFinite(port) && port > 0) return port;
+  }
+  return readAppSettings().general.webPort;
+}

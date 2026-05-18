@@ -8,8 +8,6 @@ import type { IncomingMessage } from "./types.js";
 import { parseIncomingImageKey, getImageExtension, parseReplyPayload } from "./message.js";
 import { includeContentInLogs, logger, rawLogString } from "./logger.js";
 
-const shouldLogContent = includeContentInLogs();
-
 type LarkCardElement =
   | {
       tag: "markdown";
@@ -200,7 +198,7 @@ export async function sendText(
   logger.debug("lark.send_text", {
     chatId,
     textChars: text.length,
-    ...(shouldLogContent
+    ...(includeContentInLogs()
       ? {
           text: rawLogString(text),
         }
@@ -326,7 +324,7 @@ export async function sendReply(
     textChars: payload.text.length,
     imageCount: payload.imagePaths.length,
     fileCount: payload.filePaths.length,
-    ...(shouldLogContent
+    ...(includeContentInLogs()
       ? {
           reply: rawLogString(reply),
           text: rawLogString(payload.text),

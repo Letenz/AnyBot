@@ -124,6 +124,18 @@ export function readModelConfig(): ModelConfig {
   return config;
 }
 
+export function writeModelConfig(config: ModelConfig): ModelConfig {
+  ensureConfig();
+  const next: ModelConfig = {
+    provider: config.provider,
+    currentModel: config.currentModel || "",
+    models: Array.isArray(config.models) ? config.models : [],
+    lastSelected: config.lastSelected || {},
+  };
+  writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2), "utf-8");
+  return next;
+}
+
 export function getCurrentModel(): string {
   return readModelConfig().currentModel;
 }

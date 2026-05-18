@@ -65,7 +65,6 @@ function writeWindowsLaunchers() {
 setlocal
 cd /d "%~dp0"
 
-if not exist ".env" copy ".env.example" ".env" >nul
 if not exist ".data" mkdir ".data"
 if not exist ".run" mkdir ".run"
 
@@ -124,10 +123,6 @@ function Open-AnyBotWindow {
   } else {
     Start-Process $url
   }
-}
-
-if (-not (Test-Path ".env")) {
-  Copy-Item ".env.example" ".env"
 }
 
 New-Item -ItemType Directory -Force -Path ".data", ".run" | Out-Null
@@ -191,10 +186,6 @@ Add-PathEntry "$env:LOCALAPPDATA\\Programs\\nodejs"
 Add-PathEntry "$env:ProgramFiles\\nodejs"
 Add-PathEntry "\${env:ProgramFiles(x86)}\\nodejs"
 
-if (-not (Test-Path ".env")) {
-  Copy-Item ".env.example" ".env"
-}
-
 New-Item -ItemType Directory -Force -Path ".data", ".run" | Out-Null
 
 if (Test-Path "resources\\md_files") {
@@ -243,10 +234,6 @@ set -eu
 DIR="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 cd "$DIR"
 
-if [ ! -f ".env" ]; then
-  cp ".env.example" ".env"
-fi
-
 mkdir -p ".data" ".run"
 
 if [ -d "resources/md_files" ]; then
@@ -283,8 +270,9 @@ Start:
   Open http://localhost:19981
 
 Configure:
-  Edit .env in this folder.
+  Use the Web UI for provider/model settings.
   Runtime data is stored in .data and logs are stored in .run.
+  Optional overrides such as WEB_PORT or CODEX_BIN can be passed as system environment variables before launch.
 
 ${providerNote}
 
@@ -306,7 +294,6 @@ copy(path.join(root, "dist"), path.join(releaseDir, "dist"));
 copy(path.join(root, "node_modules"), path.join(releaseDir, "node_modules"));
 copy(path.join(root, "package.json"), path.join(releaseDir, "package.json"));
 copy(path.join(root, "package-lock.json"), path.join(releaseDir, "package-lock.json"));
-copyFileIfExists(path.join(root, ".env.example"), path.join(releaseDir, ".env.example"));
 copyFileIfExists(path.join(root, "README.md"), path.join(releaseDir, "README.md"));
 copyFileIfExists(path.join(root, "README_EN.md"), path.join(releaseDir, "README_EN.md"));
 

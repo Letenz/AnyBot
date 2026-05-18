@@ -1,7 +1,7 @@
-import "dotenv/config";
 import { randomUUID } from "node:crypto";
 
 import { applyProxy } from "./proxy.js";
+import { getConfiguredWebPort } from "./app-settings.js";
 import { createApp } from "./web/server.js";
 
 import {
@@ -59,9 +59,6 @@ import {
 const providerType = readPersistedProviderType() || normalizeProviderType(process.env.PROVIDER || "codex");
 
 const provider = initProvider(providerType, getProviderConfig(providerType));
-
-const shouldLogContent = includeContentInLogs();
-const shouldLogPrompt = includePromptInLogs();
 
 // --- State with bounded memory ---
 
@@ -239,8 +236,8 @@ async function generateReply(
     userTextChars: userText.length,
     imageCount: imagePaths.length,
     promptChars: prompt.length,
-    ...(shouldLogContent ? { userText: rawLogString(userText) } : {}),
-    ...(shouldLogPrompt ? { prompt: rawLogString(prompt) } : {}),
+    ...(includeContentInLogs() ? { userText: rawLogString(userText) } : {}),
+    ...(includePromptInLogs() ? { prompt: rawLogString(prompt) } : {}),
   });
 
   const workdir = getWorkdir();
@@ -327,7 +324,7 @@ async function generateReply(
       dbSessionId: dbSession.id,
       replyChars: result.text.length,
       streamedToWeb: !!active,
-      ...(shouldLogContent ? { replyText: rawLogString(result.text) } : {}),
+      ...(includeContentInLogs() ? { replyText: rawLogString(result.text) } : {}),
     });
 
     return result.text;
@@ -401,7 +398,7 @@ const channelCallbacks: ChannelCallbacks = {
 
 // --- Startup ---
 
-const WEB_PORT = parseInt(process.env.WEB_PORT || "19981", 10);
+const WEB_PORT = getConfiguredWebPort();
 
 function exitWhenDesktopParentDies(): void {
   const parentPid = Number.parseInt(process.env.ANYBOT_DESKTOP_PARENT_PID || "", 10);
@@ -436,8 +433,8 @@ async function main(): Promise<void> {
     model: getCurrentModel(),
     workdir: getWorkdir(),
     sandbox: getSandbox(),
-    logIncludeContent: shouldLogContent,
-    logIncludePrompt: shouldLogPrompt,
+    logIncludeContent: includeContentInLogs(),
+    logIncludePrompt: includePromptInLogs(),
     webPort: WEB_PORT,
   });
 

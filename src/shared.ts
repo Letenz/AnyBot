@@ -1,8 +1,8 @@
 import type { SandboxMode } from "./types.js";
 import { getDefaultSandbox } from "./sandbox-config.js";
 import { buildSystemPrompt } from "./prompt.js";
+import { readAppSettings } from "./app-settings.js";
 
-const workdir = process.env.CODEX_WORKDIR || process.cwd();
 const extraSystemPrompt = process.env.CODEX_SYSTEM_PROMPT;
 
 function getSystemPrompt(opts?: {
@@ -10,6 +10,7 @@ function getSystemPrompt(opts?: {
   sandbox?: SandboxMode;
   includeWorkspaceMemory?: boolean;
 }): string {
+  const workdir = getWorkdir();
   return buildSystemPrompt({
     workdir: opts?.workdir || workdir,
     sandbox: opts?.sandbox || getDefaultSandbox(),
@@ -62,7 +63,7 @@ export function generateTitle(text: string): string {
 }
 
 export function getWorkdir(): string {
-  return workdir;
+  return process.env.CODEX_WORKDIR || readAppSettings().workspace.defaultWorkdir || process.cwd();
 }
 
 export function getSandbox(): SandboxMode {
