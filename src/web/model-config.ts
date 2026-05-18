@@ -6,6 +6,7 @@ import {
   getRegisteredProviderTypes,
   switchProvider,
   createProvider,
+  getProviderInstallationStatus,
 } from "../providers/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -110,6 +111,33 @@ export function getCurrentProviderType(): string {
   return readModelConfig().provider;
 }
 
+export function getModelForProvider(providerType: string): string {
+  return readModelConfigForProvider(providerType).currentModel;
+}
+
+export function readModelConfigForProvider(providerType: string): ModelConfig {
+  ensureConfig();
+  const raw = readFileSync(CONFIG_PATH, "utf-8");
+  const config = JSON.parse(raw) as ModelConfig;
+  if (!config.lastSelected) {
+    config.lastSelected = {};
+  }
+
+  const provider = createProvider(providerType);
+  const models = provider.listModels();
+  const model = selectCurrentModel(config, provider.type, models);
+  if (!config.lastSelected[provider.type]) {
+    config.lastSelected[provider.type] = model;
+    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+  }
+  return {
+    ...config,
+    provider: provider.type,
+    currentModel: model,
+    models,
+  };
+}
+
 export function setCurrentModel(modelId: string): ModelConfig {
   const config = readModelConfig();
   const valid = config.models.some((m) => m.id === modelId);
@@ -122,6 +150,30 @@ export function setCurrentModel(modelId: string): ModelConfig {
   return config;
 }
 
+export function setModelForProvider(providerType: string, modelId: string): ModelConfig {
+  const provider = createProvider(providerType);
+  const models = provider.listModels();
+  const valid = models.some((m) => m.id === modelId);
+  if (!valid) {
+    throw new Error(`不支持的模型: ${modelId}`);
+  }
+
+  const config = readModelConfig();
+  config.lastSelected[provider.type] = modelId;
+  if (config.provider === provider.type) {
+    config.currentModel = modelId;
+    config.models = models;
+  }
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), "utf-8");
+
+  return {
+    ...config,
+    provider: provider.type,
+    currentModel: modelId,
+    models,
+  };
+}
+
 export function setCurrentProvider(
   providerType: string,
   providerConfig?: Record<string, unknown>,
@@ -129,6 +181,13 @@ export function setCurrentProvider(
   const registered = getRegisteredProviderTypes();
   if (!registered.includes(providerType)) {
     throw new Error(`不支持的 Provider: ${providerType}。可用: ${registered.join(", ")}`);
+  }
+
+  const installation = getProviderInstallationStatus(providerType);
+  if (!installation.installed) {
+    throw new Error(
+      `${providerType} 未安装，无法切换。请先安装 ${installation.bin}：${installation.installHint}`,
+    );
   }
 
   const config = readModelConfig();
@@ -147,13 +206,22 @@ export function getProviderTypes(): Array<{
   type: string;
   displayName: string;
   capabilities: Record<string, boolean>;
+  installed: boolean;
+  bin: string;
+  executablePath: string | null;
+  installHint: string;
 }> {
   return getRegisteredProviderTypes().map((type) => {
     const p = createProvider(type);
+    const installation = getProviderInstallationStatus(type);
     return {
       type: p.type,
       displayName: p.displayName,
       capabilities: { ...p.capabilities },
+      installed: installation.installed,
+      bin: installation.bin,
+      executablePath: installation.executablePath,
+      installHint: installation.installHint,
     };
   });
 }

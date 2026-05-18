@@ -1,5 +1,5 @@
-import { spawn, execSync } from "node:child_process";
 import { readFileSync, realpathSync, existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type {
   IProvider,
@@ -15,6 +15,7 @@ import {
   ProviderParseError,
 } from "./codex.js";
 import { logger } from "../logger.js";
+import { killProcessTree, resolveExecutable, runCommandSync, spawnCommand } from "../utils/process.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MODELS_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -59,17 +60,13 @@ interface CursorJsonOutput {
  */
 function resolveAgentPaths(bin: string): { nodeBin: string; indexJs: string } | null {
   try {
-    const whichOutput = execSync(`which ${bin}`, {
-      encoding: "utf8",
-      timeout: 5_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    }).trim();
-    if (!whichOutput) return null;
+    const executablePath = resolveExecutable(bin);
+    if (!executablePath) return null;
 
-    const scriptContent = readFileSync(whichOutput, "utf8");
+    const scriptContent = readFileSync(executablePath, "utf8");
     if (!scriptContent.startsWith("#!/")) return null;
 
-    const realTarget = realpathSync(whichOutput);
+    const realTarget = realpathSync(executablePath);
     const scriptDir = path.dirname(realTarget);
 
     const nodeBin = path.join(scriptDir, "node");
@@ -124,9 +121,8 @@ export class CursorCliProvider implements IProvider {
     }
 
     try {
-      const output = execSync(`${this.bin} --list-models`, {
+      const output = runCommandSync(this.bin, ["--list-models"], {
         timeout: 15_000,
-        encoding: "utf8",
         stdio: ["pipe", "pipe", "pipe"],
       });
 
@@ -225,7 +221,7 @@ export class CursorCliProvider implements IProvider {
         ? [this.resolvedNodeBin, ["--use-system-ca", this.resolvedIndexJs, ...args]]
         : [this.bin, args];
 
-      const child = spawn(spawnBin, spawnArgs, {
+      const child = spawnCommand(spawnBin, spawnArgs, {
         cwd: workdir,
         env: this.buildEnv(),
         stdio: ["pipe", "pipe", "pipe"],
@@ -237,11 +233,7 @@ export class CursorCliProvider implements IProvider {
       let killed = false;
 
       const killProcessGroup = (signal: NodeJS.Signals) => {
-        try {
-          if (child.pid) process.kill(-child.pid, signal);
-        } catch {
-          child.kill(signal);
-        }
+        killProcessTree(child, signal);
       };
 
       const timer = setTimeout(() => {
@@ -412,10 +404,13 @@ export class CursorCliProvider implements IProvider {
     }
     if (this.resolvedNodeBin) {
       env.CURSOR_INVOKED_AS = path.basename(this.bin);
-      env.NODE_COMPILE_CACHE ??=
+      const cacheRoot =
         process.platform === "darwin"
-          ? `${process.env.HOME}/Library/Caches/cursor-compile-cache`
-          : `${process.env.XDG_CACHE_HOME || process.env.HOME + "/.cache"}/cursor-compile-cache`;
+          ? path.join(os.homedir(), "Library", "Caches")
+          : process.platform === "win32"
+            ? (process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"))
+            : (process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"));
+      env.NODE_COMPILE_CACHE ??= path.join(cacheRoot, "cursor-compile-cache");
     }
     return env;
   }

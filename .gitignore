@@ -1,7 +1,7 @@
 node_modules
 .env
 dist
-.packaging/
+.packaging
 .DS_Store
 .idea/
 .run/

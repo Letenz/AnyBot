@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import type {
   IProvider,
   RunOptions,
@@ -13,6 +12,7 @@ import {
   ProviderParseError,
 } from "./codex.js";
 import { logger } from "../logger.js";
+import { killProcessTree, spawnCommand } from "../utils/process.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_TRANSIENT_RETRIES = 4;
@@ -134,7 +134,7 @@ export class QoderCliProvider implements IProvider {
     });
 
     return new Promise((resolve, reject) => {
-      const child = spawn(this.bin, args, {
+      const child = spawnCommand(this.bin, args, {
         cwd: workdir,
         env: process.env,
         stdio: ["pipe", "pipe", "pipe"],
@@ -146,11 +146,7 @@ export class QoderCliProvider implements IProvider {
       let killed = false;
 
       const killProcessGroup = (signal: NodeJS.Signals) => {
-        try {
-          if (child.pid) process.kill(-child.pid, signal);
-        } catch {
-          child.kill(signal);
-        }
+        killProcessTree(child, signal);
       };
 
       const timer = setTimeout(() => {

@@ -6,10 +6,14 @@ import {
   type ThreadOptions,
   type Usage,
 } from "@openai/codex-sdk";
+import fs from "fs/promises";
+import os from "os";
+import path from "path";
 import type {
   IProvider,
   ProviderCapabilities,
   ProviderModel,
+  ProviderContextUsage,
   RunOptions,
   RunResult,
 } from "./types.js";
@@ -51,6 +55,7 @@ export class ProviderParseError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_CODEX_CONTEXT_WINDOW = 258400;
 
 type StreamHandler = (event: ClaudeAgentStreamEvent) => void | Promise<void>;
 
@@ -62,6 +67,28 @@ type ToolOutput = {
   stdout?: string;
   stderr?: string;
   text?: string;
+};
+
+type CodexTokenUsage = {
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  output_tokens?: number;
+  reasoning_output_tokens?: number;
+  total_tokens?: number;
+};
+
+type CodexTokenCountInfo = {
+  total_token_usage?: CodexTokenUsage;
+  last_token_usage?: CodexTokenUsage;
+  model_context_window?: number;
+};
+
+type CodexTokenCountEvent = {
+  type: "event_msg";
+  payload?: {
+    type?: string;
+    info?: CodexTokenCountInfo;
+  };
 };
 
 function buildInput(prompt: string, imagePaths: string[]): Input {
@@ -126,6 +153,110 @@ function buildToolTitle(item: ThreadItem, summary: string): string {
   return summary ? `${name} · ${summary}` : name;
 }
 
+function getNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function getUsageNumber(usage: CodexTokenUsage | undefined, key: keyof CodexTokenUsage): number | undefined {
+  return getNumber(usage?.[key]);
+}
+
+function calculatePercentage(usedTokens: number, maxTokens: number): number {
+  return Math.min(100, Math.round((usedTokens / maxTokens) * 1000) / 10);
+}
+
+function buildContextUsage(
+  usedTokens: number,
+  maxTokens: number,
+  extras: Partial<
+    Pick<
+      ProviderContextUsage,
+      "inputTokens" | "outputTokens" | "cacheCreationInputTokens" | "cacheReadInputTokens"
+    >
+  >,
+): ProviderContextUsage | undefined {
+  if (usedTokens <= 0 || maxTokens <= 0) return undefined;
+
+  const cappedUsedTokens = Math.min(usedTokens, maxTokens);
+  const usedPercentage = calculatePercentage(cappedUsedTokens, maxTokens);
+
+  return {
+    usedTokens: cappedUsedTokens,
+    maxTokens,
+    usedPercentage,
+    remainingPercentage: Math.max(0, Math.round((100 - usedPercentage) * 10) / 10),
+    ...extras,
+    source: "codex",
+  };
+}
+
+function isCodexTokenCountEvent(event: unknown): event is CodexTokenCountEvent {
+  if (!event || typeof event !== "object") return false;
+  const record = event as Record<string, unknown>;
+  if (record.type !== "event_msg") return false;
+  const payload = record.payload;
+  if (!payload || typeof payload !== "object") return false;
+  return (payload as Record<string, unknown>).type === "token_count";
+}
+
+async function findCodexSessionFile(sessionId: string): Promise<string | null> {
+  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
+  const sessionsDir = path.join(codexHome, "sessions");
+  const stack = [sessionsDir];
+
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    if (!currentDir) continue;
+
+    let entries: Array<import("fs").Dirent>;
+    try {
+      entries = await fs.readdir(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith(`${sessionId}.jsonl`)) {
+        return entryPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function readLatestCodexTokenCountInfo(sessionId: string | null): Promise<CodexTokenCountInfo | null> {
+  if (!sessionId) return null;
+
+  const sessionFile = await findCodexSessionFile(sessionId);
+  if (!sessionFile) return null;
+
+  let content: string;
+  try {
+    content = await fs.readFile(sessionFile, "utf8");
+  } catch {
+    return null;
+  }
+
+  let latest: CodexTokenCountInfo | null = null;
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const event: unknown = JSON.parse(line);
+      if (isCodexTokenCountEvent(event)) {
+        latest = event.payload?.info || null;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return latest;
+}
+
 function extractToolOutput(item: ThreadItem): ToolOutput | undefined {
   switch (item.type) {
     case "command_execution":
@@ -164,6 +295,42 @@ function itemStatus(item: ThreadItem): "running" | "success" | "failed" {
     default:
       return "success";
   }
+}
+
+function extractContextUsageFromTokenCount(
+  info: CodexTokenCountInfo | null,
+): ProviderContextUsage | undefined {
+  if (!info) return undefined;
+
+  const maxTokens = getNumber(info.model_context_window);
+  if (!maxTokens) return undefined;
+
+  const usage = info.last_token_usage || info.total_token_usage;
+  if (!usage) return undefined;
+
+  const usedTokens = getUsageNumber(usage, "total_tokens") || getUsageNumber(usage, "input_tokens");
+  if (!usedTokens) return undefined;
+
+  return buildContextUsage(usedTokens, maxTokens, {
+    inputTokens: getUsageNumber(usage, "input_tokens"),
+    outputTokens: getUsageNumber(usage, "output_tokens"),
+    cacheReadInputTokens: getUsageNumber(usage, "cached_input_tokens"),
+  });
+}
+
+function extractContextUsage(
+  usage: Usage | null,
+  tokenCountInfo: CodexTokenCountInfo | null,
+): ProviderContextUsage | undefined {
+  const tokenCountUsage = extractContextUsageFromTokenCount(tokenCountInfo);
+  if (tokenCountUsage) return tokenCountUsage;
+
+  if (!usage) return undefined;
+  return buildContextUsage(usage.input_tokens, DEFAULT_CODEX_CONTEXT_WINDOW, {
+    inputTokens: usage.input_tokens,
+    outputTokens: usage.output_tokens,
+    cacheReadInputTokens: usage.cached_input_tokens,
+  });
 }
 
 function isToolItem(item: ThreadItem): boolean {
@@ -235,6 +402,7 @@ export class CodexProvider implements IProvider {
     let providerSessionId = sessionId || null;
     let responseText = "";
     let usage: Usage | null = null;
+    let tokenCountInfo: CodexTokenCountInfo | null = null;
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -274,6 +442,12 @@ export class CodexProvider implements IProvider {
       });
 
       for await (const event of events) {
+        // Codex CLI can emit token_count records that are not part of the SDK's typed event union.
+        const rawEvent: unknown = event;
+        if (isCodexTokenCountEvent(rawEvent)) {
+          tokenCountInfo = rawEvent.payload?.info || null;
+        }
+
         if (event.type === "thread.started") {
           providerSessionId = event.thread_id;
         } else if (event.type === "turn.started") {
@@ -319,6 +493,9 @@ export class CodexProvider implements IProvider {
         throw new ProviderEmptyOutputError();
       }
 
+      tokenCountInfo = tokenCountInfo || (await readLatestCodexTokenCountInfo(providerSessionId));
+      const contextUsage = extractContextUsage(usage, tokenCountInfo);
+
       logger.info("provider.exec.success", {
         provider: this.type,
         workdir,
@@ -327,6 +504,7 @@ export class CodexProvider implements IProvider {
         replyChars: finalText.length,
         sessionId: providerSessionId,
         usage,
+        tokenCountInfo,
       });
 
       await onEvent?.({
@@ -340,6 +518,7 @@ export class CodexProvider implements IProvider {
       return {
         text: finalText,
         sessionId: providerSessionId,
+        contextUsage,
       };
     } catch (error) {
       clearTimeout(timer);

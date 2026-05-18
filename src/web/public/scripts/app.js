@@ -45,32 +45,55 @@
         const addProjectBtn = document.getElementById('add-project-btn');
         const historyToggle = document.getElementById('history-toggle');
         const historyList = document.getElementById('history-list');
+        const addHistoryChatBtn = document.getElementById('add-history-chat-btn');
         const newChatBtn = document.getElementById('new-chat-btn');
 
         const modelSwitcher = document.getElementById('model-switcher');
         const modelBadge = document.getElementById('model-badge');
         const modelDropdown = document.getElementById('model-dropdown');
         const currentModelNameEl = document.getElementById('current-model-name');
-
-        const providerSwitcher = document.getElementById('provider-switcher');
-        const providerBadge = document.getElementById('provider-badge');
-        const providerDropdown = document.getElementById('provider-dropdown');
-        const currentProviderNameEl = document.getElementById('current-provider-name');
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const settingsCloseBtn = document.getElementById('settings-close-btn');
+        const settingsCancelBtn = document.getElementById('settings-cancel-btn');
+        const settingsSaveBtn = document.getElementById('settings-save-btn');
+        const settingsProviderSelect = document.getElementById('settings-provider-select');
+        const settingsProviderCombobox = document.getElementById('settings-provider-combobox');
+        const settingsProviderTrigger = document.getElementById('settings-provider-trigger');
+        const settingsProviderCurrent = document.getElementById('settings-provider-current');
+        const settingsProviderMenu = document.getElementById('settings-provider-menu');
+        const settingsThemeGroup = document.getElementById('settings-theme-group');
+        const contextUsageEl = document.getElementById('context-usage');
+        const contextUsageRingEl = document.getElementById('context-usage-ring');
+        const contextUsagePercentEl = document.getElementById('context-usage-percent');
+        const contextUsageTokensEl = document.getElementById('context-usage-tokens');
+        const contextUsageProviderEl = document.getElementById('context-usage-provider');
 
         let currentSessionId = null;
         let currentSessionProjectId = null;
+        let currentSessionProvider = null;
         let activeProjectId = null;
         let isTyping = false;
         let sessions = [];
         let projects = [];
         let modelConfig = null;
         let providerData = null;
+        let latestContextUsage = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
         let isBatchRenderingMessages = false;
+        let currentSessionHasMoreMessages = false;
+        let isLoadingOlderMessages = false;
         let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
         let expandedProjectIds = readStoredSet('expandedProjectIds');
+        const SESSION_MESSAGE_PAGE_SIZE = 40;
+        const LARGE_MESSAGE_PREVIEW_CHARS = 20000;
+        const THEME_STORAGE_KEY = 'webuiTheme';
+        const HIGHLIGHT_DARK_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css';
+        const HIGHLIGHT_LIGHT_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
+        const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+        let currentThemeSetting = readStoredTheme();
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -80,6 +103,67 @@
         let pendingAttachments = []; // { path, name, size, isImage, localUrl? }
 
         const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif', '.heic', '.heif', '.avif'];
+
+        function readStoredTheme() {
+            var value = localStorage.getItem(THEME_STORAGE_KEY);
+            return ['light', 'dark', 'system'].includes(value) ? value : 'dark';
+        }
+
+        function getEffectiveTheme(setting) {
+            if (setting === 'system') {
+                return systemThemeQuery && systemThemeQuery.matches ? 'light' : 'dark';
+            }
+            return setting === 'light' ? 'light' : 'dark';
+        }
+
+        function applyTheme(setting) {
+            currentThemeSetting = ['light', 'dark', 'system'].includes(setting) ? setting : 'dark';
+            var effectiveTheme = getEffectiveTheme(currentThemeSetting);
+            document.documentElement.dataset.theme = effectiveTheme;
+            document.documentElement.dataset.themeSetting = currentThemeSetting;
+            document.documentElement.style.colorScheme = effectiveTheme;
+
+            var highlightTheme = document.getElementById('highlight-theme');
+            if (highlightTheme) {
+                highlightTheme.href = effectiveTheme === 'light' ? HIGHLIGHT_LIGHT_CSS : HIGHLIGHT_DARK_CSS;
+            }
+
+            if (settingsThemeGroup) {
+                Array.prototype.forEach.call(settingsThemeGroup.querySelectorAll('.theme-option'), function (button) {
+                    var isActive = button.dataset.themeValue === currentThemeSetting;
+                    button.classList.toggle('active', isActive);
+                    button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+                });
+            }
+
+            if (latestContextUsage) updateContextUsage(latestContextUsage);
+        }
+
+        function setTheme(setting) {
+            localStorage.setItem(THEME_STORAGE_KEY, setting);
+            applyTheme(setting);
+        }
+
+        applyTheme(currentThemeSetting);
+
+        if (settingsThemeGroup) {
+            settingsThemeGroup.addEventListener('click', function (e) {
+                var button = e.target.closest('.theme-option');
+                if (!button || !settingsThemeGroup.contains(button)) return;
+                setTheme(button.dataset.themeValue);
+            });
+        }
+
+        if (systemThemeQuery) {
+            var handleSystemThemeChange = function () {
+                if (currentThemeSetting === 'system') applyTheme('system');
+            };
+            if (systemThemeQuery.addEventListener) {
+                systemThemeQuery.addEventListener('change', handleSystemThemeChange);
+            } else if (systemThemeQuery.addListener) {
+                systemThemeQuery.addListener(handleSystemThemeChange);
+            }
+        }
 
         function getFileTypeClass(name) {
             var ext = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
@@ -103,6 +187,12 @@
 
         function updateSendBtnState() {
             sendBtn.disabled = (inputEl.value.trim() === '' && pendingAttachments.length === 0) || isTyping;
+        }
+
+        function resizeChatInput() {
+            inputEl.style.height = 'auto';
+            inputEl.style.overflowY = inputEl.scrollHeight > 160 ? 'auto' : 'hidden';
+            inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
         }
 
         function renderAttachmentPreview() {
@@ -188,8 +278,7 @@
         }
 
         inputEl.addEventListener('input', function () {
-            this.style.height = 'auto';
-            this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+            resizeChatInput();
             updateSendBtnState();
         });
 
@@ -201,10 +290,16 @@
         });
 
         sendBtn.addEventListener('click', sendMessage);
-        newChatBtn.addEventListener('click', createNewChat);
+        newChatBtn.addEventListener('click', function () {
+            createNewChat();
+        });
         projectToggle.addEventListener('click', toggleProjects);
         addProjectBtn.addEventListener('click', addProject);
         historyToggle.addEventListener('click', toggleHistory);
+        addHistoryChatBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            createNewChat(null, { force: true });
+        });
 
         // 附件按钮 - 点击触发文件选择
         attachBtn.addEventListener('click', function () {
@@ -318,6 +413,57 @@
             if (empty) empty.remove();
         }
 
+        async function fetchFullMessageContent(messageId) {
+            if (!currentSessionId || !messageId) throw new Error('无法加载完整内容');
+            var res = await fetch('/api/sessions/' + currentSessionId + '/messages/' + encodeURIComponent(messageId) + '/content');
+            if (!res.ok) throw new Error('加载完整内容失败');
+            var data = await res.json();
+            return data.content || '';
+        }
+
+        function renderAssistantText(content, text, opts) {
+            opts = opts || {};
+            var fullText = String(text || '');
+            var renderText = fullText;
+            var isLarge = opts.contentTruncated || fullText.length > LARGE_MESSAGE_PREVIEW_CHARS;
+            if (isLarge) {
+                renderText = opts.contentTruncated
+                    ? fullText
+                    : fullText.slice(0, LARGE_MESSAGE_PREVIEW_CHARS) + '\n\n...[内容较长，已折叠]';
+            }
+            try {
+                content.innerHTML = marked.parse(renderText);
+            } catch (e) {
+                content.textContent = renderText;
+            }
+            if (!isLarge) return;
+            var expand = document.createElement('button');
+            expand.className = 'large-message-expand';
+            expand.type = 'button';
+            expand.textContent = opts.contentChars ? ('展开完整内容（' + formatTokenCount(opts.contentChars) + ' 字符）') : '展开完整内容';
+            expand.addEventListener('click', async function () {
+                expand.disabled = true;
+                expand.textContent = '加载中...';
+                var nextText = fullText;
+                if (opts.contentTruncated && opts.messageId) {
+                    try {
+                        nextText = await fetchFullMessageContent(opts.messageId);
+                    } catch (e) {
+                        showError(e.message || '加载完整内容失败');
+                        expand.disabled = false;
+                        expand.textContent = '展开完整内容';
+                        return;
+                    }
+                }
+                try {
+                    content.innerHTML = marked.parse(nextText);
+                } catch (e) {
+                    content.textContent = nextText;
+                }
+            });
+            content.appendChild(expand);
+        }
+
         function showEmptyState() {
             messagesEl.innerHTML =
                 '<div id="empty-state">' +
@@ -327,7 +473,7 @@
                 '</div>';
         }
 
-        function appendMessage(role, text, attachments, changeReview) {
+        function appendMessage(role, text, attachments, changeReview, opts) {
             clearEmpty();
             var row = document.createElement('div');
             row.className = 'message-row ' + role;
@@ -342,11 +488,7 @@
 
                 var content = document.createElement('div');
                 content.className = 'message-content';
-                try {
-                    content.innerHTML = marked.parse(text);
-                } catch (e) {
-                    content.textContent = text;
-                }
+                renderAssistantText(content, text, opts);
                 if (changeReview && window.ChangeReview) {
                     var reviewCard = window.ChangeReview.render({
                         review: changeReview,
@@ -364,7 +506,28 @@
 
                 var content = document.createElement('div');
                 content.className = 'message-content';
-                content.textContent = text;
+                var userText = document.createElement('div');
+                userText.textContent = text;
+                content.appendChild(userText);
+                if (opts && opts.contentTruncated && opts.messageId) {
+                    var userExpand = document.createElement('button');
+                    userExpand.className = 'large-message-expand';
+                    userExpand.type = 'button';
+                    userExpand.textContent = opts.contentChars ? ('展开完整内容（' + formatTokenCount(opts.contentChars) + ' 字符）') : '展开完整内容';
+                    userExpand.addEventListener('click', async function () {
+                        userExpand.disabled = true;
+                        userExpand.textContent = '加载中...';
+                        try {
+                            userText.textContent = await fetchFullMessageContent(opts.messageId);
+                            userExpand.remove();
+                        } catch (e) {
+                            showError(e.message || '加载完整内容失败');
+                            userExpand.disabled = false;
+                            userExpand.textContent = '展开完整内容';
+                        }
+                    });
+                    content.appendChild(userExpand);
+                }
 
                 // 显示附件：图片渲染缩略图，其他渲染标签
                 if (attachments && attachments.length > 0) {
@@ -402,6 +565,101 @@
             messagesEl.appendChild(row);
             scrollBottom();
             return row;
+        }
+
+        function getOldestRenderedMessageId() {
+            var first = messagesEl.querySelector('.message-row[data-message-id]');
+            return first ? Number(first.dataset.messageId || 0) : null;
+        }
+
+        function removeOlderMessagesControl() {
+            var existing = document.getElementById('load-older-messages');
+            if (existing) existing.remove();
+        }
+
+        function renderOlderMessagesControl() {
+            removeOlderMessagesControl();
+            if (!currentSessionHasMoreMessages) return;
+            var btn = document.createElement('button');
+            btn.id = 'load-older-messages';
+            btn.className = 'load-older-messages';
+            btn.type = 'button';
+            btn.textContent = isLoadingOlderMessages ? '加载中...' : '加载更早消息';
+            btn.disabled = isLoadingOlderMessages;
+            btn.addEventListener('click', loadOlderMessages);
+            messagesEl.insertBefore(btn, messagesEl.firstChild);
+        }
+
+        function renderMessageRecord(m, beforeNode) {
+            var row = null;
+            var attInfo = null;
+            var meta = parseMessageMetadata(m.metadata);
+            if (meta.attachments && meta.attachments.length > 0) {
+                attInfo = meta.attachments;
+            }
+            if (m.role === 'assistant' && meta.claudeAgentLoop && window.ClaudeAgentLoop && window.ClaudeAgentLoop.renderPersistedMessage) {
+                clearEmpty();
+                var view = window.ClaudeAgentLoop.renderPersistedMessage({
+                    messagesEl: messagesEl,
+                    scrollBottom: scrollBottom,
+                    content: m.content,
+                    loop: meta.claudeAgentLoop,
+                    changeReview: meta.changeReview,
+                    contentTruncated: !!m.contentTruncated,
+                    contentChars: m.contentChars,
+                    fullContentLoader: m.contentTruncated
+                        ? function () { return fetchFullMessageContent(m.id); }
+                        : null,
+                });
+                row = view && view.row;
+                var usageEvents = Array.isArray(meta.claudeAgentLoop.events)
+                    ? meta.claudeAgentLoop.events.filter(function (event) { return event && event.type === 'context_usage' && event.usage; })
+                    : [];
+                if (usageEvents.length > 0) updateContextUsage(usageEvents[usageEvents.length - 1].usage);
+            } else {
+                row = appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview, {
+                    messageId: m.id,
+                    contentTruncated: !!m.contentTruncated,
+                    contentChars: m.contentChars,
+                });
+            }
+            if (row) {
+                row.dataset.messageId = String(m.id);
+                if (beforeNode && row !== beforeNode) messagesEl.insertBefore(row, beforeNode);
+            }
+            return row;
+        }
+
+        async function loadOlderMessages() {
+            if (!currentSessionId || isLoadingOlderMessages) return;
+            var beforeId = getOldestRenderedMessageId();
+            if (!beforeId) return;
+            var anchor = messagesEl.querySelector('.message-row[data-message-id]');
+            var previousScrollHeight = messagesEl.scrollHeight;
+            try {
+                isLoadingOlderMessages = true;
+                renderOlderMessagesControl();
+                var res = await fetch('/api/sessions/' + currentSessionId + '/messages?before=' + encodeURIComponent(beforeId) + '&limit=' + SESSION_MESSAGE_PAGE_SIZE);
+                if (!res.ok) throw new Error('加载更早消息失败');
+                var data = await res.json();
+                removeOlderMessagesControl();
+                isBatchRenderingMessages = true;
+                try {
+                    (data.messages || []).forEach(function (m) {
+                        renderMessageRecord(m, anchor);
+                    });
+                } finally {
+                    isBatchRenderingMessages = false;
+                }
+                currentSessionHasMoreMessages = !!data.hasMoreMessages;
+                renderOlderMessagesControl();
+                messagesEl.scrollTop += messagesEl.scrollHeight - previousScrollHeight;
+            } catch (e) {
+                showError(e.message || '加载更早消息失败');
+            } finally {
+                isLoadingOlderMessages = false;
+                renderOlderMessagesControl();
+            }
         }
 
         function showTyping() {
@@ -445,6 +703,55 @@
                 return JSON.parse(raw) || {};
             } catch (_) {
                 return {};
+            }
+        }
+
+        function formatTokenCount(value) {
+            var n = Number(value || 0);
+            if (!Number.isFinite(n) || n <= 0) return '0';
+            if (n >= 1000000) return (n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '') + 'm';
+            if (n >= 1000) return Math.round(n / 1000) + 'k';
+            return String(Math.round(n));
+        }
+
+        function contextUsageColor(percent) {
+            if (percent >= 90) return '#ef4444';
+            if (percent >= 70) return '#f59e0b';
+            return '#9ca3af';
+        }
+
+        function updateContextUsage(usage) {
+            latestContextUsage = usage || {
+                usedTokens: 0,
+                maxTokens: 0,
+                usedPercentage: 0,
+                remainingPercentage: 100,
+                source: '',
+            };
+            if (!contextUsageEl || !contextUsageRingEl || !latestContextUsage) return;
+
+            var usedPercent = Math.max(0, Math.min(100, Number(latestContextUsage.usedPercentage || 0)));
+            var remainingPercent = Math.max(0, Math.round((100 - usedPercent) * 10) / 10);
+            var usedTokens = Number(latestContextUsage.usedTokens || 0);
+            var maxTokens = Number(latestContextUsage.maxTokens || 0);
+            var color = contextUsageColor(usedPercent);
+            var degrees = usedPercent * 3.6;
+
+            contextUsageEl.classList.toggle('has-data', usedTokens > 0 && maxTokens > 0);
+            contextUsageRingEl.style.background =
+                'radial-gradient(circle at center, var(--input-bg) 48%, transparent 50%), ' +
+                'conic-gradient(' + color + ' ' + degrees + 'deg, var(--ring-track) ' + degrees + 'deg)';
+
+            if (contextUsagePercentEl) {
+                contextUsagePercentEl.textContent =
+                    Math.round(usedPercent) + '% 已用（剩余 ' + Math.round(remainingPercent) + '%）';
+            }
+            if (contextUsageTokensEl) {
+                contextUsageTokensEl.textContent =
+                    '已用 ' + formatTokenCount(usedTokens) + ' token，共 ' + formatTokenCount(maxTokens);
+            }
+            if (contextUsageProviderEl) {
+                contextUsageProviderEl.textContent = '';
             }
         }
 
@@ -641,12 +948,20 @@
             projectList.innerHTML = '';
             projects.forEach(function (project) {
                 var isExpanded = expandedProjectIds.has(project.id);
-                var row = document.createElement('button');
+                var row = document.createElement('div');
                 row.className = 'project-item' + (activeProjectId === project.id ? ' active' : '');
-                row.type = 'button';
+                row.setAttribute('role', 'button');
+                row.tabIndex = 0;
                 row.dataset.id = project.id;
                 row.setAttribute('aria-expanded', String(isExpanded));
-                row.innerHTML = folderIcon(isExpanded) + '<span class="project-name"></span>';
+                row.innerHTML =
+                    folderIcon(isExpanded) +
+                    '<span class="project-name"></span>' +
+                    '<button class="project-create-chat" type="button" title="新对话" aria-label="在当前项目新建对话">' +
+                    '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">' +
+                    '<path d="M6.5 1.5v10M1.5 6.5h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' +
+                    '</svg>' +
+                    '</button>';
                 row.querySelector('.project-name').textContent = project.name;
                 row.addEventListener('click', function () {
                     if (activeProjectId === project.id) {
@@ -660,6 +975,16 @@
                         return;
                     }
                     selectProject(project.id);
+                });
+                row.addEventListener('keydown', function (e) {
+                    if (e.target !== row) return;
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    row.click();
+                });
+                row.querySelector('.project-create-chat').addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    createNewChat(project.id, { force: true });
                 });
                 projectList.appendChild(row);
 
@@ -684,6 +1009,32 @@
             projectList.querySelectorAll('.project-session-item').forEach(function (item) {
                 item.classList.toggle('active', isChat && item.dataset.id === currentSessionId);
             });
+        }
+
+        function revealSessionContainer(projectId) {
+            if (projectId) {
+                isProjectsCollapsed = false;
+                localStorage.setItem('projectsCollapsed', 'false');
+                expandedProjectIds.add(projectId);
+                saveStoredSet('expandedProjectIds', expandedProjectIds);
+                updateProjectsCollapsedState();
+            } else {
+                isHistoryCollapsed = false;
+                localStorage.setItem('historyCollapsed', 'false');
+                updateHistoryCollapsedState();
+            }
+        }
+
+        function revealActiveSessionInSidebar() {
+            if (!currentSessionId) return;
+            var container = currentSessionProjectId ? projectList : historyList;
+            var items = container.querySelectorAll('[data-id]');
+            for (var i = 0; i < items.length; i++) {
+                if (items[i].dataset.id === currentSessionId) {
+                    items[i].scrollIntoView({ block: 'nearest' });
+                    return;
+                }
+            }
         }
 
         async function fetchSessions() {
@@ -726,11 +1077,27 @@
             }
         }
 
-        async function createNewChat() {
+        async function createNewChat(projectId, options) {
+            options = options || {};
+            var targetProjectId = arguments.length > 0 ? projectId : activeProjectId;
+            if (!targetProjectId) targetProjectId = null;
             if (currentView !== 'chat') {
                 showChatView();
             }
-            if (currentSessionId && currentSessionProjectId === activeProjectId && !document.querySelector('#messages .message-row')) {
+            var currentProviderType = providerData && providerData.current;
+            var canReuseEmptySession =
+                !options.force &&
+                currentSessionId &&
+                currentSessionProjectId === targetProjectId &&
+                (!currentProviderType || currentSessionProvider === currentProviderType) &&
+                !document.querySelector('#messages .message-row');
+            if (canReuseEmptySession) {
+                activeProjectId = targetProjectId;
+                revealSessionContainer(targetProjectId);
+                renderHistory();
+                renderProjects();
+                updateSidebarSelection();
+                revealActiveSessionInSidebar();
                 inputEl.focus();
                 return;
             }
@@ -738,19 +1105,26 @@
                 var res = await fetch('/api/sessions', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ projectId: activeProjectId }),
+                    body: JSON.stringify({ projectId: targetProjectId }),
                 });
                 var data = await res.json();
                 if (!res.ok) throw new Error(data.error || '创建会话失败');
                 currentSessionId = data.id;
-                currentSessionProjectId = data.projectId || null;
+                currentSessionProjectId = data.projectId || targetProjectId || null;
+                currentSessionProvider = data.provider || null;
+                activeProjectId = currentSessionProjectId;
+                revealSessionContainer(currentSessionProjectId);
                 showChatView();
+                updateContextUsage(null);
                 showEmptyState();
                 inputEl.value = '';
-                inputEl.style.height = 'auto';
+                resizeChatInput();
                 sendBtn.disabled = true;
                 inputEl.focus();
+                await fetchModelConfig(currentSessionProvider);
                 await fetchSessions();
+                updateSidebarSelection();
+                revealActiveSessionInSidebar();
             } catch (e) {
                 showError(e.message || '创建会话失败');
             }
@@ -786,6 +1160,7 @@
                     sessionId: sessionId,
                     view: agentView,
                     signal: controller.signal,
+                    onContextUsage: updateContextUsage,
                 });
 
                 if (activeStreamSessionId !== sessionId) return;
@@ -827,7 +1202,7 @@
 
             try {
                 stopActiveStreamSubscription();
-                var res = await fetch('/api/sessions/' + id);
+                var res = await fetch('/api/sessions/' + id + '?limit=' + SESSION_MESSAGE_PAGE_SIZE);
                 if (!res.ok) {
                     showError('加载会话失败');
                     return;
@@ -836,7 +1211,11 @@
                 var wasChatView = currentView === 'chat';
                 currentSessionId = id;
                 currentSessionProjectId = data.projectId || null;
+                currentSessionProvider = data.provider || null;
                 activeProjectId = data.projectId || null;
+                currentSessionHasMoreMessages = !!data.hasMoreMessages;
+                isLoadingOlderMessages = false;
+                updateContextUsage(null);
                 var didExpandProject = false;
                 if (activeProjectId && !expandedProjectIds.has(activeProjectId)) {
                     expandedProjectIds.add(activeProjectId);
@@ -853,29 +1232,15 @@
                         showEmptyState();
                     } else {
                         data.messages.forEach(function (m) {
-                            var attInfo = null;
-                            var meta = parseMessageMetadata(m.metadata);
-                            if (meta.attachments && meta.attachments.length > 0) {
-                                attInfo = meta.attachments;
-                            }
-                            if (m.role === 'assistant' && meta.claudeAgentLoop && window.ClaudeAgentLoop && window.ClaudeAgentLoop.renderPersistedMessage) {
-                                clearEmpty();
-                                window.ClaudeAgentLoop.renderPersistedMessage({
-                                    messagesEl: messagesEl,
-                                    scrollBottom: scrollBottom,
-                                    content: m.content,
-                                    loop: meta.claudeAgentLoop,
-                                    changeReview: meta.changeReview,
-                                });
-                                return;
-                            }
-                            appendMessage(m.role === 'user' ? 'user' : 'ai', m.content, attInfo, meta.changeReview);
+                            renderMessageRecord(m);
                         });
                     }
                 } finally {
                     isBatchRenderingMessages = false;
                 }
+                renderOlderMessagesControl();
                 scrollBottom();
+                await fetchModelConfig(currentSessionProvider);
 
                 if (data.activeStream) {
                     resumeActiveStream(id, data.activeStream);
@@ -895,6 +1260,8 @@
                 if (currentSessionId === id) {
                     currentSessionId = null;
                     currentSessionProjectId = null;
+                    currentSessionProvider = null;
+                    updateContextUsage(null);
                     showEmptyState();
                 }
                 await fetchSessions();
@@ -913,7 +1280,7 @@
             var attachmentInfos = readyAttachments.map(function (a) { return { name: a.name, path: a.path }; });
 
             inputEl.value = '';
-            inputEl.style.height = 'auto';
+            resizeChatInput();
             sendBtn.disabled = true;
             isTyping = true;
 
@@ -934,7 +1301,7 @@
 
             var agentView = null;
             try {
-                if (window.ClaudeAgentLoop && window.ClaudeAgentLoop.canStream(providerData)) {
+                if (window.ClaudeAgentLoop && window.ClaudeAgentLoop.canStream(currentSessionProvider || (providerData && providerData.current))) {
                     removeTyping();
                     agentView = window.ClaudeAgentLoop.createMessage({
                         messagesEl: messagesEl,
@@ -944,8 +1311,12 @@
                         sessionId: currentSessionId,
                         body: body,
                         view: agentView,
+                        onContextUsage: updateContextUsage,
                     });
                     if (!streamResult.fallback) {
+                        if (streamResult.result && streamResult.result.provider) {
+                            currentSessionProvider = streamResult.result.provider;
+                        }
                         await fetchSessions();
                         isTyping = false;
                         updateSendBtnState();
@@ -974,6 +1345,8 @@
                 }
 
                 var data = await res.json();
+                if (data.provider) currentSessionProvider = data.provider;
+                if (data.contextUsage) updateContextUsage(data.contextUsage);
                 appendMessage('ai', data.content, null, data.changeReview);
 
                 await fetchSessions();
@@ -992,11 +1365,23 @@
             updateSendBtnState();
         }
 
-        async function fetchModelConfig() {
+        function getModelConfigProvider() {
+            return (modelConfig && modelConfig.provider) || currentSessionProvider || (providerData && providerData.current) || '';
+        }
+
+        function updateModelBadgeLabel() {
+            if (!modelConfig) return;
+            currentModelNameEl.textContent = modelConfig.currentModel;
+            modelBadge.title = currentModelNameEl.textContent;
+        }
+
+        async function fetchModelConfig(providerType) {
             try {
-                var res = await fetch('/api/model-config');
+                var targetProvider = providerType || currentSessionProvider || '';
+                var url = '/api/model-config' + (targetProvider ? '?provider=' + encodeURIComponent(targetProvider) : '');
+                var res = await fetch(url);
                 modelConfig = await res.json();
-                currentModelNameEl.textContent = modelConfig.currentModel;
+                updateModelBadgeLabel();
                 renderModelDropdown();
             } catch (e) {
                 currentModelNameEl.textContent = 'error';
@@ -1029,13 +1414,14 @@
         async function switchModel(modelId) {
             if (!modelConfig || modelId === modelConfig.currentModel) {
                 modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
                 return;
             }
             try {
                 var res = await fetch('/api/model-config', {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({modelId: modelId}),
+                    body: JSON.stringify({modelId: modelId, provider: getModelConfigProvider()}),
                 });
                 if (!res.ok) {
                     var err = await res.json().catch(function () {
@@ -1045,9 +1431,10 @@
                     return;
                 }
                 modelConfig = await res.json();
-                currentModelNameEl.textContent = modelConfig.currentModel;
+                updateModelBadgeLabel();
                 renderModelDropdown();
                 modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
             } catch (e) {
                 showError('切换模型失败');
             }
@@ -1055,47 +1442,243 @@
 
         modelBadge.addEventListener('click', function (e) {
             e.stopPropagation();
-            providerSwitcher.classList.remove('open');
-            modelSwitcher.classList.toggle('open');
+            var isOpen = modelSwitcher.classList.toggle('open');
+            modelBadge.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         });
+
+        if (settingsProviderTrigger) {
+            settingsProviderTrigger.addEventListener('click', function (e) {
+                e.stopPropagation();
+                setSettingsProviderMenuOpen(!settingsProviderCombobox.classList.contains('open'));
+            });
+            settingsProviderTrigger.addEventListener('keydown', function (e) {
+                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSettingsProviderMenuOpen(true);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSettingsProviderMenuOpen(true);
+                    requestAnimationFrame(function () {
+                        var options = getSettingsProviderOptions();
+                        var last = options[options.length - 1];
+                        if (last) last.focus();
+                    });
+                } else if (e.key === 'Escape') {
+                    setSettingsProviderMenuOpen(false);
+                }
+            });
+        }
+
+        if (settingsProviderMenu) {
+            settingsProviderMenu.addEventListener('click', function (e) {
+                e.stopPropagation();
+            });
+        }
 
         async function fetchProviders() {
             try {
                 var res = await fetch('/api/providers');
                 providerData = await res.json();
-                currentProviderNameEl.textContent = providerData.current;
-                renderProviderDropdown();
+                renderProviderSelect();
+                updateModelBadgeLabel();
             } catch (e) {
-                currentProviderNameEl.textContent = 'error';
                 console.error('Failed to fetch providers:', e);
             }
         }
 
-        function renderProviderDropdown() {
-            if (!providerData) return;
-            providerDropdown.innerHTML = '';
+        function renderProviderSelect() {
+            if (!providerData || !settingsProviderSelect) return;
+            settingsProviderSelect.innerHTML = '';
+            if (settingsProviderMenu) settingsProviderMenu.innerHTML = '';
             providerData.providers.forEach(function (p) {
-                var opt = document.createElement('div');
-                opt.className = 'provider-option' + (p.type === providerData.current ? ' active' : '');
-                opt.innerHTML =
-                    '<div class="provider-option-name">' +
-                    (p.type === providerData.current
-                        ? '<svg class="model-option-check" viewBox="0 0 14 14" fill="none"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-                        : '<span style="width:14px;display:inline-block"></span>') +
-                    escapeHtml(p.displayName) +
-                    '</div>';
-                opt.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    switchProviderTo(p.type);
-                });
-                providerDropdown.appendChild(opt);
+                var isInstalled = isProviderInstalled(p);
+                var opt = document.createElement('option');
+                opt.value = p.type;
+                opt.textContent = p.displayName + (isInstalled ? '' : '（未安装）');
+                opt.disabled = !isInstalled;
+                settingsProviderSelect.appendChild(opt);
+
+                if (settingsProviderMenu) {
+                    var item = document.createElement('button');
+                    item.className = 'settings-combobox-option';
+                    item.type = 'button';
+                    item.disabled = !isInstalled;
+                    item.setAttribute('role', 'option');
+                    item.setAttribute('aria-disabled', isInstalled ? 'false' : 'true');
+                    if (!isInstalled) item.title = (p.bin || p.displayName) + ' 未安装';
+                    item.dataset.providerType = p.type;
+                    item.dataset.providerDisplayName = p.displayName;
+                    item.dataset.providerInstalled = isInstalled ? 'true' : 'false';
+                    item.dataset.providerBin = p.bin || '';
+                    item.innerHTML = buildSettingsProviderOptionHtml(false, p.displayName, !isInstalled);
+                    item.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        if (setSettingsProviderValue(p.type)) {
+                            setSettingsProviderMenuOpen(false);
+                            settingsProviderTrigger.focus();
+                        }
+                    });
+                    item.addEventListener('keydown', handleSettingsProviderOptionKeydown);
+                    settingsProviderMenu.appendChild(item);
+                }
+            });
+            settingsProviderSelect.value = providerData.current;
+            updateSettingsProviderDisplay();
+        }
+
+        function isProviderInstalled(provider) {
+            return !provider || provider.installed !== false;
+        }
+
+        function isSettingsProviderSelectable(providerType) {
+            if (!providerData) return false;
+            var provider = providerData.providers.find(function (p) {
+                return p.type === providerType;
+            });
+            return !!provider && isProviderInstalled(provider);
+        }
+
+        function buildSettingsProviderOptionHtml(isActive, displayName, isDisabled) {
+            return (
+                isActive
+                    ? '<svg class="settings-combobox-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                    : '<span class="settings-combobox-check-placeholder"></span>'
+            ) +
+                '<span class="settings-combobox-option-label">' + escapeHtml(displayName || '') + '</span>' +
+                (isDisabled ? '<span class="settings-combobox-option-status">未安装</span>' : '');
+        }
+
+        function getSettingsProviderOptions(includeDisabled) {
+            if (!settingsProviderMenu) return [];
+            var options = Array.prototype.slice.call(settingsProviderMenu.querySelectorAll('.settings-combobox-option'));
+            if (includeDisabled) return options;
+            return options.filter(function (item) {
+                return item.dataset.providerInstalled !== 'false' && !item.disabled;
             });
         }
 
-        async function switchProviderTo(providerType) {
-            if (!providerData || providerType === providerData.current) {
-                providerSwitcher.classList.remove('open');
+        function updateSettingsProviderDisplay() {
+            if (!providerData || !settingsProviderSelect) return;
+            var selected = providerData.providers.find(function (p) {
+                return p.type === settingsProviderSelect.value;
+            });
+            if (settingsProviderCurrent) {
+                settingsProviderCurrent.textContent = selected
+                    ? selected.displayName + (isProviderInstalled(selected) ? '' : '（未安装）')
+                    : '请选择提供商';
+            }
+            getSettingsProviderOptions(true).forEach(function (item) {
+                var isActive = item.dataset.providerType === settingsProviderSelect.value;
+                var isDisabled = item.dataset.providerInstalled === 'false';
+                item.classList.toggle('active', isActive);
+                item.classList.toggle('disabled', isDisabled);
+                item.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                item.innerHTML = buildSettingsProviderOptionHtml(
+                    isActive,
+                    item.dataset.providerDisplayName || '',
+                    isDisabled,
+                );
+            });
+        }
+
+        function setSettingsProviderValue(providerType) {
+            if (!settingsProviderSelect) return false;
+            if (!isSettingsProviderSelectable(providerType)) {
+                showError('该 Provider 未安装，无法选择');
+                return false;
+            }
+            settingsProviderSelect.value = providerType;
+            updateSettingsProviderDisplay();
+            return true;
+        }
+
+        function setSettingsProviderMenuOpen(isOpen) {
+            if (!settingsProviderCombobox || !settingsProviderTrigger) return;
+            settingsProviderCombobox.classList.toggle('open', isOpen);
+            settingsProviderTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            if (isOpen) {
+                var active = settingsProviderMenu && settingsProviderMenu.querySelector('.settings-combobox-option.active:not(:disabled)');
+                requestAnimationFrame(function () {
+                    (active || getSettingsProviderOptions()[0] || settingsProviderTrigger).focus();
+                });
+            }
+        }
+
+        function moveSettingsProviderFocus(delta) {
+            var options = getSettingsProviderOptions();
+            if (!options.length) return;
+            var currentIndex = options.indexOf(document.activeElement);
+            var nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + options.length) % options.length;
+            options[nextIndex].focus();
+        }
+
+        function handleSettingsProviderOptionKeydown(e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveSettingsProviderFocus(1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveSettingsProviderFocus(-1);
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                var first = getSettingsProviderOptions()[0];
+                if (first) first.focus();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                var options = getSettingsProviderOptions();
+                var last = options[options.length - 1];
+                if (last) last.focus();
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (setSettingsProviderValue(e.currentTarget.dataset.providerType)) {
+                    setSettingsProviderMenuOpen(false);
+                    settingsProviderTrigger.focus();
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setSettingsProviderMenuOpen(false);
+                settingsProviderTrigger.focus();
+            }
+        }
+
+        function openSettingsPanel() {
+            if (providerData) renderProviderSelect();
+            settingsOverlay.classList.add('open');
+            settingsOverlay.setAttribute('aria-hidden', 'false');
+            settingsBtn.classList.add('active');
+            modelSwitcher.classList.remove('open');
+            modelBadge.setAttribute('aria-expanded', 'false');
+            requestAnimationFrame(function () {
+                if (settingsProviderTrigger) settingsProviderTrigger.focus();
+            });
+        }
+
+        function closeSettingsPanel() {
+            setSettingsProviderMenuOpen(false);
+            settingsOverlay.classList.remove('open');
+            settingsOverlay.setAttribute('aria-hidden', 'true');
+            settingsBtn.classList.remove('active');
+        }
+
+        async function saveSettings() {
+            if (!providerData || !settingsProviderSelect) return;
+            if (!isSettingsProviderSelectable(settingsProviderSelect.value)) {
+                showError('该 Provider 未安装，无法保存');
                 return;
+            }
+            await switchProviderTo(settingsProviderSelect.value, { closeOnSuccess: true });
+        }
+
+        async function switchProviderTo(providerType, opts) {
+            if (!providerData || providerType === providerData.current) {
+                if (opts && opts.closeOnSuccess) closeSettingsPanel();
+                return;
+            }
+            var shouldClose = !!(opts && opts.closeOnSuccess);
+            var originalText = settingsSaveBtn.textContent;
+            if (shouldClose) {
+                settingsSaveBtn.disabled = true;
+                settingsSaveBtn.textContent = '保存中…';
             }
             try {
                 var res = await fetch('/api/providers/current', {
@@ -1108,30 +1691,60 @@
                     showError(err.error || '切换 Provider 失败');
                     return;
                 }
-                modelConfig = await res.json();
+                var switchedConfig = await res.json();
                 providerData.current = providerType;
-                currentProviderNameEl.textContent = providerType;
-                currentModelNameEl.textContent = modelConfig.currentModel;
-                renderProviderDropdown();
+                if (!currentSessionProvider || currentSessionProvider === providerType) {
+                    modelConfig = switchedConfig;
+                    updateModelBadgeLabel();
+                } else {
+                    await fetchModelConfig(currentSessionProvider);
+                }
+                renderProviderSelect();
                 renderModelDropdown();
-                providerSwitcher.classList.remove('open');
+                if (shouldClose) closeSettingsPanel();
             } catch (e) {
                 showError('切换 Provider 失败');
+            } finally {
+                if (shouldClose) {
+                    settingsSaveBtn.disabled = false;
+                    settingsSaveBtn.textContent = originalText;
+                }
             }
         }
 
-        providerBadge.addEventListener('click', function (e) {
+        settingsBtn.addEventListener('click', function (e) {
             e.stopPropagation();
-            modelSwitcher.classList.remove('open');
-            providerSwitcher.classList.toggle('open');
+            openSettingsPanel();
+        });
+
+        settingsCloseBtn.addEventListener('click', closeSettingsPanel);
+        settingsCancelBtn.addEventListener('click', closeSettingsPanel);
+        settingsSaveBtn.addEventListener('click', saveSettings);
+
+        settingsOverlay.addEventListener('click', function (e) {
+            if (e.target === settingsOverlay) closeSettingsPanel();
         });
 
         document.addEventListener('click', function (e) {
             if (!modelSwitcher.contains(e.target)) {
                 modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
             }
-            if (!providerSwitcher.contains(e.target)) {
-                providerSwitcher.classList.remove('open');
+            if (settingsProviderCombobox && !settingsProviderCombobox.contains(e.target)) {
+                setSettingsProviderMenuOpen(false);
+            }
+        });
+
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                if (settingsProviderCombobox && settingsProviderCombobox.classList.contains('open')) {
+                    setSettingsProviderMenuOpen(false);
+                    settingsProviderTrigger.focus();
+                    return;
+                }
+                modelSwitcher.classList.remove('open');
+                modelBadge.setAttribute('aria-expanded', 'false');
+                if (settingsOverlay.classList.contains('open')) closeSettingsPanel();
             }
         });
 

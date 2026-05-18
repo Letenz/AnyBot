@@ -7,11 +7,14 @@ import { createApp } from "./web/server.js";
 import {
   initProvider,
   getProvider,
+  getProviderConfig,
+  createProvider,
   normalizeProviderType,
   ProviderTimeoutError,
   ProviderProcessError,
   ProviderEmptyOutputError,
 } from "./providers/index.js";
+import type { IProvider } from "./providers/index.js";
 import {
   includeContentInLogs,
   includePromptInLogs,
@@ -20,6 +23,7 @@ import {
 } from "./logger.js";
 import {
   getCurrentModel,
+  getModelForProvider,
   readModelConfig,
   setCurrentProvider,
   setCurrentModel,
@@ -36,44 +40,22 @@ import {
   getWorkdir,
   getSandbox,
 } from "./shared.js";
+import type { ClaudeAgentStreamEvent } from "./providers/claude-code-agent-events.js";
+import {
+  buildAssistantMetadata,
+  createActiveAgentStream,
+  emitAgentStream,
+  finishAgentStream,
+  hasActiveAgentStream,
+  type AgentStreamEvent,
+} from "./web/agent-stream.js";
+import {
+  collectChangeReview,
+  createChangeSnapshot,
+  type PublicChangeReview,
+} from "./web/change-review.js";
 
 const providerType = normalizeProviderType(process.env.PROVIDER || "codex");
-
-function getProviderConfig(type: string): Record<string, unknown> {
-  switch (type) {
-    case "codex":
-      return { bin: process.env.CODEX_BIN };
-    case "gemini-cli":
-      return {
-        bin: process.env.GEMINI_CLI_BIN,
-        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || "yolo",
-      };
-    case "cursor-cli":
-      return {
-        bin: process.env.CURSOR_CLI_BIN,
-        workspace: process.env.CURSOR_CLI_WORKSPACE,
-        apiKey: process.env.CURSOR_API_KEY,
-      };
-    case "qoder-cli":
-      return {
-        bin: process.env.QODER_CLI_BIN,
-        maxTurns: process.env.QODER_CLI_MAX_TURNS
-          ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
-          : undefined,
-      };
-    case "claude-code":
-      return {
-        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_BIN,
-        defaultModel: process.env.CLAUDE_AGENT_MODEL,
-        maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
-          ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
-          : undefined,
-        permissionMode: process.env.CLAUDE_AGENT_PERMISSION_MODE,
-      };
-    default:
-      return {};
-  }
-}
 
 const provider = initProvider(providerType, getProviderConfig(providerType));
 
@@ -168,6 +150,7 @@ function getOrCreateChannelSession(
     id: generateId(),
     title: "新对话",
     sessionId: null,
+    provider: getProvider().type,
     source,
     chatId,
     projectId: null,
@@ -179,6 +162,44 @@ function getOrCreateChannelSession(
   return session;
 }
 
+function getSessionProvider(session: db.ChatSession) {
+  if (!session.provider) {
+    session.provider = getProvider().type;
+  }
+  const currentProvider = getProvider();
+  return session.provider === currentProvider.type
+    ? currentProvider
+    : createProvider(session.provider, getProviderConfig(session.provider));
+}
+
+function isStreamingProvider(
+  provider: IProvider,
+): provider is IProvider & Required<Pick<IProvider, "runWithEvents">> {
+  return typeof provider.runWithEvents === "function";
+}
+
+async function safeCreateChangeSnapshotForWorkdir(
+  workdir: string,
+): Promise<Awaited<ReturnType<typeof createChangeSnapshot>>> {
+  try {
+    return await createChangeSnapshot(workdir);
+  } catch (error) {
+    logger.warn("change_review.snapshot_failed", { error });
+    return null;
+  }
+}
+
+async function safeCollectChangeReview(
+  snapshot: Awaited<ReturnType<typeof createChangeSnapshot>>,
+): Promise<PublicChangeReview | null> {
+  try {
+    return await collectChangeReview(snapshot);
+  } catch (error) {
+    logger.warn("change_review.collect_failed", { error });
+    return null;
+  }
+}
+
 async function generateReply(
   chatId: string,
   userText: string,
@@ -186,23 +207,31 @@ async function generateReply(
   source: string = "unknown",
 ): Promise<string> {
   const sessionKey = getChatSessionKey(source, chatId);
-  const sessionId = sessionIdByChat.get(sessionKey);
+  const dbSession = getOrCreateChannelSession(source, chatId);
+  const provider = getSessionProvider(dbSession);
+  const sessionId = sessionIdByChat.get(sessionKey) || dbSession.sessionId;
   const sessionGeneration = getSessionGeneration(sessionKey);
   const prompt = sessionId
     ? buildResumePrompt(userText, source)
     : buildFirstTurnPrompt(userText, source);
 
-  const dbSession = getOrCreateChannelSession(source, chatId);
   db.addMessage(dbSession.id, "user", userText);
 
   if (dbSession.messages.length <= 1) {
     dbSession.title = generateTitle(userText);
   }
+  db.updateSession({
+    id: dbSession.id,
+    title: dbSession.title,
+    sessionId: dbSession.sessionId,
+    provider: dbSession.provider,
+    updatedAt: Date.now(),
+  });
 
   logger.info("reply.generate.start", {
     chatId,
     source,
-    provider: getProvider().type,
+    provider: provider.type,
     mode: sessionId ? "resume" : "new",
     sessionId: sessionId || null,
     dbSessionId: dbSession.id,
@@ -213,39 +242,107 @@ async function generateReply(
     ...(shouldLogPrompt ? { prompt: rawLogString(prompt) } : {}),
   });
 
-  const result = await getProvider().run({
-    workdir: getWorkdir(),
-    sandbox: getSandbox(),
-    model: getCurrentModel(),
+  const workdir = getWorkdir();
+  const sandbox = getSandbox();
+  const runOptions = {
+    workdir,
+    sandbox,
+    model: getModelForProvider(provider.type),
     prompt,
     imagePaths,
     sessionId: sessionId || undefined,
     newSessionId: sessionId ? undefined : randomUUID(),
-  });
+  };
+  const agentEvents: ClaudeAgentStreamEvent[] = [];
+  const active = isStreamingProvider(provider) && !hasActiveAgentStream(dbSession.id)
+    ? createActiveAgentStream(dbSession.id)
+    : null;
 
-  if (result.sessionId && sessionGeneration === getSessionGeneration(sessionKey)) {
-    sessionIdByChat.set(sessionKey, result.sessionId);
+  try {
+    const changeSnapshot = active ? await safeCreateChangeSnapshotForWorkdir(workdir) : null;
+    const emit = active
+      ? (event: AgentStreamEvent) => {
+          if (event.type !== "result" && event.type !== "error" && event.type !== "done") {
+            agentEvents.push(event);
+          }
+          emitAgentStream(active, event);
+        }
+      : null;
+
+    const result = emit && isStreamingProvider(provider)
+      ? await provider.runWithEvents({ ...runOptions, onEvent: emit })
+      : await provider.run(runOptions);
+
+    const changeReview = active ? await safeCollectChangeReview(changeSnapshot) : null;
+
+    if (result.contextUsage && emit) {
+      emit({
+        type: "context_usage",
+        usage: result.contextUsage,
+      });
+    }
+
+    if (result.sessionId && sessionGeneration === getSessionGeneration(sessionKey)) {
+      sessionIdByChat.set(sessionKey, result.sessionId);
+    }
+
+    db.addMessage(
+      dbSession.id,
+      "assistant",
+      result.text,
+      active
+        ? buildAssistantMetadata({
+            provider: provider.type,
+            events: agentEvents,
+            changeReview,
+          })
+        : JSON.stringify({ provider: provider.type }),
+    );
+    db.updateSession({
+      id: dbSession.id,
+      title: dbSession.title,
+      sessionId: result.sessionId || dbSession.sessionId,
+      provider: dbSession.provider,
+      updatedAt: Date.now(),
+    });
+
+    if (emit) {
+      emit({
+        type: "result",
+        content: result.text,
+        title: dbSession.title,
+        sessionId: result.sessionId || dbSession.sessionId,
+        provider: provider.type,
+        changeReview,
+        contextUsage: result.contextUsage,
+      });
+    }
+
+    logger.info("reply.generate.success", {
+      chatId,
+      source,
+      provider: provider.type,
+      sessionId: result.sessionId,
+      dbSessionId: dbSession.id,
+      replyChars: result.text.length,
+      streamedToWeb: !!active,
+      ...(shouldLogContent ? { replyText: rawLogString(result.text) } : {}),
+    });
+
+    return result.text;
+  } catch (error) {
+    if (active) {
+      emitAgentStream(active, {
+        type: "error",
+        error: error instanceof Error ? error.message : "处理消息时出错了，请稍后再试。",
+      });
+    }
+    throw error;
+  } finally {
+    if (active) {
+      finishAgentStream(dbSession.id, active);
+    }
   }
-
-  db.addMessage(dbSession.id, "assistant", result.text);
-  db.updateSession({
-    id: dbSession.id,
-    title: dbSession.title,
-    sessionId: result.sessionId || dbSession.sessionId,
-    updatedAt: Date.now(),
-  });
-
-  logger.info("reply.generate.success", {
-    chatId,
-    source,
-    provider: getProvider().type,
-    sessionId: result.sessionId,
-    dbSessionId: dbSession.id,
-    replyChars: result.text.length,
-    ...(shouldLogContent ? { replyText: rawLogString(result.text) } : {}),
-  });
-
-  return result.text;
 }
 
 // --- Channel callbacks ---

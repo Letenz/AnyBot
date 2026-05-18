@@ -6,6 +6,7 @@ import type {
   SDKMessage,
   SDKPartialAssistantMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { ProviderContextUsage } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -61,7 +62,8 @@ export type ClaudeAgentStreamEvent =
       path: string;
       event: "change" | "add" | "unlink";
       diff?: string;
-    };
+    }
+  | { type: "context_usage"; usage: ProviderContextUsage };
 
 const SECRET_PATTERNS: RegExp[] = [
   /\b(sk-[A-Za-z0-9_-]{12,})\b/g,

@@ -6,13 +6,15 @@ import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { Request, Response } from "express";
-import { getProvider, getRegisteredProviderTypes } from "../providers/index.js";
+import { createProvider, getProvider, getRegisteredProviderTypes } from "../providers/index.js";
 import { logger } from "../logger.js";
 import * as db from "./db.js";
 import {
   readModelConfig,
-  getCurrentModel,
+  readModelConfigForProvider,
+  getModelForProvider,
   setCurrentModel,
+  setModelForProvider,
   setCurrentProvider,
   getProviderTypes,
 } from "./model-config.js";
@@ -45,8 +47,21 @@ import {
 } from "../shared.js";
 import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
 import type { IProvider } from "../providers/index.js";
+import {
+  attachAgentStreamClient,
+  buildAssistantMetadata,
+  compactAgentEvents,
+  createActiveAgentStream,
+  emitAgentStream,
+  finishAgentStream,
+  getActiveAgentStreamInfo,
+  hasActiveAgentStream,
+  type AgentStreamEvent,
+} from "./agent-stream.js";
 
 const execFile = promisify(execFileCallback);
+const DEFAULT_SESSION_MESSAGE_LIMIT = 40;
+const MESSAGE_PREVIEW_CHARS = 20000;
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
@@ -55,34 +70,75 @@ function isImageFile(filePath: string): boolean {
   return IMAGE_EXTS.has(path.extname(filePath).toLowerCase());
 }
 
-function writeSse(res: Response, event: string, data: unknown): void {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-}
-
 function isStreamingProvider(
   provider: ReturnType<typeof getProvider>,
 ): provider is IProvider & Required<Pick<IProvider, "runWithEvents">> {
   return typeof provider.runWithEvents === "function";
 }
 
-function buildAssistantMetadata(opts: {
-  provider?: string;
-  events?: ClaudeAgentStreamEvent[];
-  changeReview?: PublicChangeReview | null;
-}): string | null {
-  const metadata: Record<string, unknown> = {};
-  if (opts.provider && opts.events) {
-    metadata.claudeAgentLoop = {
-      version: 1,
-      provider: opts.provider,
-      events: opts.events,
+function getSessionProvider(session: Pick<db.ChatSession, "provider">): IProvider {
+  const currentProvider = getProvider();
+  const providerType = session.provider || currentProvider.type;
+  if (providerType === currentProvider.type) return currentProvider;
+  return createProvider(providerType);
+}
+
+function bindSessionProvider(session: Pick<db.ChatSession, "provider">): string {
+  if (session.provider) return session.provider;
+  session.provider = getProvider().type;
+  return session.provider;
+}
+
+function readMessagePageQuery(req: Request): { beforeId: number | null; limit: number } {
+  const beforeRaw = Array.isArray(req.query.before) ? req.query.before[0] : req.query.before;
+  const limitRaw = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+  const before = beforeRaw ? Number(beforeRaw) : null;
+  const limit = limitRaw ? Number(limitRaw) : DEFAULT_SESSION_MESSAGE_LIMIT;
+  return {
+    beforeId: before && Number.isFinite(before) && before > 0 ? Math.floor(before) : null,
+    limit: Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : DEFAULT_SESSION_MESSAGE_LIMIT,
+  };
+}
+
+type ClientChatMessage = db.ChatMessage & {
+  contentTruncated?: boolean;
+  contentChars?: number;
+};
+
+async function prepareMessagesForClient(
+  messages: db.ChatMessage[],
+): Promise<ClientChatMessage[]> {
+  const hydrated = await hydrateChangeReviewMetadata(messages);
+  return hydrated.map((message) => {
+    let metadata = message.metadata;
+    if (metadata) {
+      try {
+        const parsed = JSON.parse(metadata) as Record<string, unknown>;
+        const loop = parsed.claudeAgentLoop as { events?: ClaudeAgentStreamEvent[] } | undefined;
+        if (loop && Array.isArray(loop.events)) {
+          parsed.claudeAgentLoop = {
+            ...loop,
+            events: compactAgentEvents(loop.events),
+          };
+          metadata = JSON.stringify(parsed);
+        }
+      } catch {
+        metadata = message.metadata;
+      }
+    }
+
+    if (message.content.length <= MESSAGE_PREVIEW_CHARS) {
+      return { ...message, metadata };
+    }
+
+    return {
+      ...message,
+      metadata,
+      content: `${message.content.slice(0, MESSAGE_PREVIEW_CHARS)}\n\n...[内容较长，已折叠]`,
+      contentTruncated: true,
+      contentChars: message.content.length,
     };
-  }
-  if (opts.changeReview) {
-    metadata.changeReview = opts.changeReview;
-  }
-  return Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
+  });
 }
 
 async function hydrateChangeReviewMetadata(
@@ -126,68 +182,6 @@ async function safeCollectChangeReview(
     logger.warn("change_review.collect_failed", { error });
     return null;
   }
-}
-
-type AgentStreamEvent =
-  | ClaudeAgentStreamEvent
-  | {
-      type: "result";
-      content: string;
-      title: string;
-      sessionId: string | null;
-      changeReview?: PublicChangeReview | null;
-    }
-  | { type: "error"; error: string }
-  | { type: "done" };
-
-type ActiveAgentStream = {
-  events: AgentStreamEvent[];
-  clients: Set<Response>;
-  startedAt: number;
-  done: boolean;
-};
-
-const activeAgentStreams = new Map<string, ActiveAgentStream>();
-
-function emitAgentStream(active: ActiveAgentStream, event: AgentStreamEvent): void {
-  active.events.push(event);
-  for (const client of active.clients) {
-    if (client.writableEnded) continue;
-    writeSse(client, event.type, event);
-  }
-}
-
-function attachAgentStreamClient(res: Response, active: ActiveAgentStream): void {
-  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.flushHeaders?.();
-
-  active.clients.add(res);
-  res.on("close", () => {
-    active.clients.delete(res);
-  });
-
-  for (const event of active.events) {
-    if (res.writableEnded) break;
-    writeSse(res, event.type, event);
-  }
-
-  if (active.done && !res.writableEnded) {
-    res.end();
-  }
-}
-
-function finishAgentStream(sessionId: string, active: ActiveAgentStream): void {
-  if (!active.done) {
-    active.done = true;
-    emitAgentStream(active, { type: "done" });
-  }
-  for (const client of active.clients) {
-    if (!client.writableEnded) client.end();
-  }
-  active.clients.clear();
-  activeAgentStreams.delete(sessionId);
 }
 
 function normalizeProjectPath(inputPath: string): string {
@@ -282,7 +276,7 @@ function readProjectTree(project: db.Project, relativePath: string): Array<{
     });
 }
 
-function getSessionWorkdir(session: db.ChatSession): string {
+function getSessionWorkdir(session: Pick<db.ChatSession, "projectId">): string {
   if (!session.projectId) return getWorkdir();
   const project = db.getProject(session.projectId);
   if (!project) {
@@ -377,6 +371,7 @@ export function chatRouter(): Router {
       id: generateId(),
       title: "新对话",
       sessionId: null,
+      provider: getProvider().type,
       source: "web",
       chatId: null,
       projectId: projectId || null,
@@ -385,25 +380,60 @@ export function chatRouter(): Router {
       updatedAt: Date.now(),
     };
     db.createSession(session);
-    res.json({ id: session.id, title: session.title });
+    res.json({ id: session.id, title: session.title, projectId: session.projectId, provider: session.provider });
   });
 
   router.get("/sessions/:id", async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
     }
+    const page = db.getMessagesPage(id, readMessagePageQuery(req));
     res.json({
       id: session.id,
       title: session.title,
+      provider: session.provider,
       projectId: session.projectId,
-      messages: await hydrateChangeReviewMetadata(session.messages),
-      activeStream: activeAgentStreams.has(session.id)
-        ? { startedAt: activeAgentStreams.get(session.id)?.startedAt }
-        : null,
+      messages: await prepareMessagesForClient(page.messages),
+      hasMoreMessages: page.hasMore,
+      activeStream: getActiveAgentStreamInfo(session.id),
     });
+  });
+
+  router.get("/sessions/:id/messages", async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const session = db.getSessionMetadata(id);
+    if (!session) {
+      res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+    const page = db.getMessagesPage(id, readMessagePageQuery(req));
+    res.json({
+      messages: await prepareMessagesForClient(page.messages),
+      hasMoreMessages: page.hasMore,
+    });
+  });
+
+  router.get("/sessions/:id/messages/:messageId/content", (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const messageId = Number(req.params.messageId);
+    if (!Number.isFinite(messageId) || messageId <= 0) {
+      res.status(400).json({ error: "消息 ID 无效" });
+      return;
+    }
+    const session = db.getSessionMetadata(id);
+    if (!session) {
+      res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+    const content = db.getMessageContent(id, Math.floor(messageId));
+    if (content == null) {
+      res.status(404).json({ error: "消息不存在" });
+      return;
+    }
+    res.json({ content });
   });
 
   router.delete("/sessions/:id", (req: Request, res: Response) => {
@@ -414,23 +444,24 @@ export function chatRouter(): Router {
 
   // --- Model & Provider config ---
 
-  router.get("/model-config", (_req: Request, res: Response) => {
+  router.get("/model-config", (req: Request, res: Response) => {
     try {
-      res.json(readModelConfig());
+      const provider = typeof req.query.provider === "string" ? req.query.provider : "";
+      res.json(provider ? readModelConfigForProvider(provider) : readModelConfig());
     } catch (error) {
       res.status(500).json({ error: "读取模型配置失败" });
     }
   });
 
   router.put("/model-config", (req: Request, res: Response) => {
-    const { modelId } = req.body as { modelId?: string };
+    const { modelId, provider } = req.body as { modelId?: string; provider?: string };
     if (!modelId) {
       res.status(400).json({ error: "缺少 modelId" });
       return;
     }
     try {
-      const config = setCurrentModel(modelId);
-      logger.info("model.switched", { modelId });
+      const config = provider ? setModelForProvider(provider, modelId) : setCurrentModel(modelId);
+      logger.info("model.switched", { modelId, provider: provider || config.provider });
       res.json(config);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "切换模型失败";
@@ -739,37 +770,28 @@ export function chatRouter(): Router {
 
   router.get("/sessions/:id/messages/stream", (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
     }
 
-    const active = activeAgentStreams.get(id);
-    if (!active) {
+    if (!attachAgentStreamClient(id, res)) {
       res.status(404).json({ error: "当前会话没有正在进行的流式响应" });
       return;
     }
-
-    attachAgentStreamClient(res, active);
   });
 
   router.post("/sessions/:id/messages/stream", async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
     }
 
-    if (activeAgentStreams.has(id)) {
+    if (hasActiveAgentStream(id)) {
       res.status(423).json({ error: "当前会话正在处理中，请稍后再发送新消息" });
-      return;
-    }
-
-    const provider = getProvider();
-    if (session.source !== "web" || !isStreamingProvider(provider)) {
-      res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
       return;
     }
 
@@ -779,6 +801,13 @@ export function chatRouter(): Router {
     };
     if (!content?.trim() && (!attachments || attachments.length === 0)) {
       res.status(400).json({ error: "消息不能为空" });
+      return;
+    }
+
+    bindSessionProvider(session);
+    const provider = getSessionProvider(session);
+    if (!isStreamingProvider(provider)) {
+      res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
       return;
     }
 
@@ -817,32 +846,27 @@ export function chatRouter(): Router {
 
     db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
 
-    if (session.messages.length <= 1) {
+    if (db.countMessages(id) <= 1) {
       session.title = generateTitle(content?.trim() || "文件分析");
     }
     db.updateSession({
       id,
       title: session.title,
       sessionId: session.sessionId,
+      provider: session.provider,
       updatedAt: Date.now(),
     });
 
     const prompt = session.sessionId
-      ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText, "web", {
+      ? buildResumePrompt(userText, session.source || "web")
+      : buildFirstTurnPrompt(userText, session.source || "web", {
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
           includeWorkspaceMemory: !session.projectId,
         });
 
-    const active: ActiveAgentStream = {
-      events: [],
-      clients: new Set(),
-      startedAt: Date.now(),
-      done: false,
-    };
-    activeAgentStreams.set(id, active);
-    attachAgentStreamClient(res, active);
+    const active = createActiveAgentStream(id);
+    attachAgentStreamClient(id, res);
 
     const agentEvents: ClaudeAgentStreamEvent[] = [];
     const emit = (event: AgentStreamEvent) => {
@@ -868,7 +892,7 @@ export function chatRouter(): Router {
         const result = await provider.runWithEvents({
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
-          model: getCurrentModel(),
+          model: getModelForProvider(provider.type),
           prompt,
           imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
           sessionId: session.sessionId || undefined,
@@ -878,6 +902,13 @@ export function chatRouter(): Router {
 
         const providerSessionId = result.sessionId || session.sessionId;
         const changeReview = await safeCollectChangeReview(changeSnapshot);
+        if (result.contextUsage) {
+          emit({
+            type: "context_usage",
+            usage: result.contextUsage,
+          });
+        }
+
         db.addMessage(
           id,
           "assistant",
@@ -892,6 +923,7 @@ export function chatRouter(): Router {
           id,
           title: session.title,
           sessionId: providerSessionId,
+          provider: session.provider,
           updatedAt: Date.now(),
         });
 
@@ -900,7 +932,9 @@ export function chatRouter(): Router {
           content: result.text,
           title: session.title,
           sessionId: providerSessionId,
+          provider: provider.type,
           changeReview,
+          contextUsage: result.contextUsage,
         });
 
         logger.info("web.chat.stream.success", {
@@ -926,13 +960,13 @@ export function chatRouter(): Router {
 
   router.post("/sessions/:id/messages", async (req: Request, res: Response) => {
     const id = req.params.id as string;
-    const session = db.getSession(id);
+    const session = db.getSessionMetadata(id);
     if (!session) {
       res.status(404).json({ error: "会话不存在" });
       return;
     }
 
-    if (activeAgentStreams.has(id)) {
+    if (hasActiveAgentStream(id)) {
       res.status(423).json({ error: "当前会话正在处理中，请稍后再发送新消息" });
       return;
     }
@@ -985,20 +1019,22 @@ export function chatRouter(): Router {
 
     db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
 
-    if (session.messages.length <= 1) {
+    if (db.countMessages(id) <= 1) {
       session.title = generateTitle(content?.trim() || "文件分析");
     }
 
+    bindSessionProvider(session);
+
     const prompt = session.sessionId
-      ? buildResumePrompt(userText)
-      : buildFirstTurnPrompt(userText, "web", {
+      ? buildResumePrompt(userText, session.source || "web")
+      : buildFirstTurnPrompt(userText, session.source || "web", {
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
           includeWorkspaceMemory: !session.projectId,
         });
 
     try {
-      const provider = getProvider();
+      const provider = getSessionProvider(session);
       logger.info("web.chat.start", {
         sessionId: session.id,
         providerSessionId: session.sessionId,
@@ -1013,7 +1049,7 @@ export function chatRouter(): Router {
       const result = await provider.run({
         workdir: sessionWorkdir,
         sandbox: getSandbox(),
-        model: getCurrentModel(),
+        model: getModelForProvider(provider.type),
         prompt,
         imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
         sessionId: session.sessionId || undefined,
@@ -1026,12 +1062,13 @@ export function chatRouter(): Router {
         id,
         "assistant",
         result.text,
-        buildAssistantMetadata({ changeReview }),
+        buildAssistantMetadata({ provider: provider.type, changeReview }),
       );
       db.updateSession({
         id,
         title: session.title,
         sessionId: providerSessionId,
+        provider: session.provider,
         updatedAt: Date.now(),
       });
 
@@ -1046,7 +1083,9 @@ export function chatRouter(): Router {
         role: "assistant",
         content: result.text,
         title: session.title,
+        provider: provider.type,
         changeReview,
+        contextUsage: result.contextUsage,
       });
     } catch (error) {
       logger.error("web.chat.failed", {

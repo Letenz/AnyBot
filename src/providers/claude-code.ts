@@ -3,6 +3,7 @@ import {
   type Options,
   type PermissionMode,
   type SDKMessage,
+  type SDKControlGetContextUsageResponse,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type {
@@ -11,6 +12,7 @@ import type {
   RunResult,
   ProviderModel,
   ProviderCapabilities,
+  ProviderContextUsage,
 } from "./types.js";
 import {
   ProviderTimeoutError,
@@ -30,6 +32,13 @@ import type { SandboxMode } from "../types.js";
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_CLAUDE_CODE_BIN = "claude";
+
+const WORKDIR_SAFETY_PROMPT = [
+  "## 工作目录规则",
+  "- 在进行任何文件操作之前，先使用 `pwd` 确认当前处于正确目录",
+  "- 未经用户明确确认，绝不要使用 `git reset --hard` 或 `git clean -fd`",
+  "- 对关键操作使用绝对路径",
+].join("\n");
 
 const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "LS"];
 const WORKSPACE_WRITE_TOOLS = [
@@ -82,6 +91,77 @@ function buildAllowedTools(sandbox: SandboxMode): string[] | undefined {
   }
 
   return sandbox === "workspace-write" ? WORKSPACE_WRITE_TOOLS : READ_ONLY_TOOLS;
+}
+
+function getUsageNumber(usage: unknown, key: string): number {
+  if (!usage || typeof usage !== "object") return 0;
+  const value = (usage as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function extractContextUsage(result: SDKResultMessage): ProviderContextUsage | undefined {
+  const inputTokens = getUsageNumber(result.usage, "input_tokens");
+  const outputTokens = getUsageNumber(result.usage, "output_tokens");
+  const cacheCreationInputTokens = getUsageNumber(result.usage, "cache_creation_input_tokens");
+  const cacheReadInputTokens = getUsageNumber(result.usage, "cache_read_input_tokens");
+  const usedTokens = inputTokens + cacheCreationInputTokens + cacheReadInputTokens;
+  const modelUsages = Object.values(result.modelUsage || {});
+  const maxTokens = modelUsages.find((entry) => entry.contextWindow > 0)?.contextWindow;
+
+  if (!usedTokens || !maxTokens) return undefined;
+
+  const usedPercentage = Math.min(100, Math.round((usedTokens / maxTokens) * 1000) / 10);
+  return {
+    usedTokens,
+    maxTokens,
+    usedPercentage,
+    remainingPercentage: Math.max(0, Math.round((100 - usedPercentage) * 10) / 10),
+    inputTokens,
+    outputTokens,
+    cacheCreationInputTokens,
+    cacheReadInputTokens,
+    source: "claude-code",
+  };
+}
+
+function extractContextUsageFromBreakdown(
+  breakdown: SDKControlGetContextUsageResponse | null,
+): ProviderContextUsage | undefined {
+  if (!breakdown || !breakdown.totalTokens || !breakdown.maxTokens) return undefined;
+
+  const usedPercentage =
+    typeof breakdown.percentage === "number" && Number.isFinite(breakdown.percentage)
+      ? Math.min(100, Math.round(breakdown.percentage * 10) / 10)
+      : Math.min(100, Math.round((breakdown.totalTokens / breakdown.maxTokens) * 1000) / 10);
+  const apiUsage = breakdown.apiUsage;
+
+  return {
+    usedTokens: breakdown.totalTokens,
+    maxTokens: breakdown.maxTokens,
+    usedPercentage,
+    remainingPercentage: Math.max(0, Math.round((100 - usedPercentage) * 10) / 10),
+    inputTokens: apiUsage?.input_tokens,
+    outputTokens: apiUsage?.output_tokens,
+    cacheCreationInputTokens: apiUsage?.cache_creation_input_tokens,
+    cacheReadInputTokens: apiUsage?.cache_read_input_tokens,
+    source: "claude-code",
+  };
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`等待 Claude Code context usage 分类超时（${timeoutMs}ms）`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 export class ClaudeCodeProvider implements IProvider {
@@ -137,12 +217,12 @@ export class ClaudeCodeProvider implements IProvider {
   ): Promise<RunResult> {
     const {
       workdir,
-      prompt,
       model,
       sessionId,
       newSessionId,
       timeoutMs = DEFAULT_TIMEOUT_MS,
     } = opts;
+    const prompt = `${WORKDIR_SAFETY_PROMPT}\n\n${opts.prompt}`;
     const sandbox = opts.sandbox ?? "read-only";
     const startedAt = Date.now();
     const abortController = new AbortController();
@@ -170,6 +250,9 @@ export class ClaudeCodeProvider implements IProvider {
 
     try {
       let resultMessage: SDKResultMessage | null = null;
+      let contextUsageBreakdown: SDKControlGetContextUsageResponse | null = null;
+      let contextUsageBreakdownPromise: Promise<SDKControlGetContextUsageResponse | null> | null =
+        null;
       const env: NodeJS.ProcessEnv = {
         ...process.env,
         CLAUDE_AGENT_SDK_CLIENT_APP: process.env.CLAUDE_AGENT_SDK_CLIENT_APP || "anybot/0.1.0",
@@ -254,7 +337,21 @@ export class ClaudeCodeProvider implements IProvider {
         },
       });
 
+      const requestContextUsageBreakdown = () => {
+        if (contextUsageBreakdownPromise) return;
+        contextUsageBreakdownPromise = withTimeout(stream.getContextUsage(), 5000)
+          .then((breakdown) => {
+            contextUsageBreakdown = breakdown;
+            return breakdown;
+          })
+          .catch(() => null);
+      };
+
       for await (const message of stream) {
+        if (message.type === "assistant") {
+          requestContextUsageBreakdown();
+        }
+
         if (onEvent) {
           const delta = extractAssistantTextDelta(message);
           if (delta) {
@@ -270,6 +367,10 @@ export class ClaudeCodeProvider implements IProvider {
         if (isSdkResultMessage(message)) {
           resultMessage = message;
         }
+      }
+
+      if (contextUsageBreakdownPromise) {
+        contextUsageBreakdown = await contextUsageBreakdownPromise;
       }
 
       clearTimeout(timer);
@@ -314,6 +415,9 @@ export class ClaudeCodeProvider implements IProvider {
         throw new ProviderEmptyOutputError();
       }
 
+      const contextUsage =
+        extractContextUsageFromBreakdown(contextUsageBreakdown) || extractContextUsage(resultMessage);
+
       logger.info("provider.exec.success", {
         provider: this.type,
         workdir,
@@ -335,6 +439,7 @@ export class ClaudeCodeProvider implements IProvider {
       return {
         text: responseText,
         sessionId: resultMessage.session_id,
+        contextUsage,
       };
     } catch (err) {
       clearTimeout(timer);

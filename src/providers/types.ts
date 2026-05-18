@@ -22,6 +22,19 @@ export interface RunOptions {
 export interface RunResult {
   text: string;
   sessionId: string | null;
+  contextUsage?: ProviderContextUsage;
+}
+
+export interface ProviderContextUsage {
+  usedTokens: number;
+  maxTokens: number;
+  usedPercentage: number;
+  remainingPercentage: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  source: "claude-code" | "codex" | string;
 }
 
 export interface ProviderCapabilities {

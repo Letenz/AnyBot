@@ -1,4 +1,6 @@
 (function () {
+    var LARGE_MESSAGE_PREVIEW_CHARS = 20000;
+
     function escapeHtml(value) {
         return String(value || '')
             .replace(/&/g, '&amp;')
@@ -66,6 +68,9 @@
             status: 'running',
             durationMs: Math.max(0, Date.now() - startedAt),
             changeReview: opts.changeReview || null,
+            answerIsTruncated: !!opts.contentTruncated,
+            answerChars: opts.contentChars || 0,
+            fullAnswerLoader: opts.fullContentLoader || null,
         };
 
         var row = document.createElement('div');
@@ -159,10 +164,41 @@
 
         function renderAnswer() {
             finalEl.classList.remove('streaming');
-            finalEl.innerHTML = renderMarkdown(state.answerText);
+            var answerText = String(state.answerText || '');
+            var isLarge = state.answerIsTruncated || answerText.length > LARGE_MESSAGE_PREVIEW_CHARS;
+            var visibleText = isLarge
+                ? (state.answerIsTruncated ? answerText : answerText.slice(0, LARGE_MESSAGE_PREVIEW_CHARS) + '\n\n...[内容较长，已折叠]')
+                : answerText;
+            finalEl.innerHTML = renderMarkdown(visibleText);
             finalEl.querySelectorAll('pre code').forEach(function (block) {
                 if (typeof hljs !== 'undefined') hljs.highlightElement(block);
             });
+            if (isLarge) {
+                var expand = document.createElement('button');
+                expand.className = 'large-message-expand';
+                expand.type = 'button';
+                expand.textContent = state.answerChars ? ('展开完整内容（' + state.answerChars + ' 字符）') : '展开完整内容';
+                expand.addEventListener('click', async function () {
+                    expand.disabled = true;
+                    expand.textContent = '加载中...';
+                    if (state.answerIsTruncated && state.fullAnswerLoader) {
+                        try {
+                            state.answerText = await state.fullAnswerLoader();
+                            state.answerIsTruncated = false;
+                        } catch (_) {
+                            expand.disabled = false;
+                            expand.textContent = '展开完整内容';
+                            return;
+                        }
+                    }
+                    finalEl.innerHTML = renderMarkdown(state.answerText);
+                    finalEl.querySelectorAll('pre code').forEach(function (block) {
+                        if (typeof hljs !== 'undefined') hljs.highlightElement(block);
+                    });
+                    renderChangeReview();
+                });
+                finalEl.appendChild(expand);
+            }
             renderChangeReview();
             scrollBottom();
         }
@@ -470,6 +506,9 @@
             type: 'result',
             content: opts.content || '',
             changeReview: opts.changeReview || null,
+            contentTruncated: !!opts.contentTruncated,
+            contentChars: opts.contentChars,
+            fullContentLoader: opts.fullContentLoader || null,
         });
         return view;
     }
@@ -487,17 +526,26 @@
         var reader = res.body.getReader();
         var decoder = new TextDecoder();
         var buffer = '';
+        var resultPayload = null;
 
         while (true) {
             var chunk = await reader.read();
             if (chunk.done) break;
             buffer += decoder.decode(chunk.value, { stream: true });
             buffer = parseSseChunk(buffer, function (_eventName, data) {
+                if (data && data.type === 'result') {
+                    resultPayload = data;
+                }
+                if (data && data.type === 'context_usage' && data.usage && opts.onContextUsage) {
+                    opts.onContextUsage(data.usage);
+                } else if (data && data.type === 'result' && data.contextUsage && opts.onContextUsage) {
+                    opts.onContextUsage(data.contextUsage);
+                }
                 opts.view.handleEvent(data);
             });
         }
 
-        return { fallback: false, inactive: false };
+        return { fallback: false, inactive: false, result: resultPayload };
     }
 
     async function stream(opts) {
@@ -519,8 +567,8 @@
         return consumeStreamResponse(res, opts);
     }
 
-    function canStream(providerData) {
-        return !!providerData && (providerData.current === 'claude-code' || providerData.current === 'codex');
+    function canStream(providerType) {
+        return providerType === 'claude-code' || providerType === 'codex';
     }
 
     window.ClaudeAgentLoop = {

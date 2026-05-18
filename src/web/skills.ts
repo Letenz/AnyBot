@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { getProvider } from "../providers/index.js";
 
 export interface SkillInfo {
@@ -233,15 +233,18 @@ export function deleteSkill(id: string): { ok: boolean; error?: string } {
 
 function openDirectory(dir: string): void {
   const platform = os.platform();
-  let cmd: string;
   if (platform === "darwin") {
-    cmd = `open "${dir}"`;
+    spawn("open", [dir], { detached: true, stdio: "ignore" }).unref();
   } else if (platform === "win32") {
-    cmd = `explorer "${dir}"`;
+    spawn("explorer.exe", [dir], { detached: true, stdio: "ignore" }).unref();
   } else {
-    cmd = `nautilus "${dir}" 2>/dev/null || thunar "${dir}" 2>/dev/null || dolphin "${dir}" 2>/dev/null || xdg-open "${dir}"`;
+    spawn("sh", [
+      "-c",
+      "nautilus \"$1\" 2>/dev/null || thunar \"$1\" 2>/dev/null || dolphin \"$1\" 2>/dev/null || xdg-open \"$1\"",
+      "sh",
+      dir,
+    ], { detached: true, stdio: "ignore" }).unref();
   }
-  exec(cmd, () => {});
 }
 
 export function openSkillsFolder(skillPath?: string): void {

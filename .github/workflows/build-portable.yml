@@ -1,0 +1,106 @@
+name: Build Portable Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build release files
+        run: npm run build:release
+
+      - name: Prune dev dependencies
+        run: npm prune --omit=dev
+
+      - name: Assemble portable package
+        run: npm run package:portable
+
+      - name: Zip Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Get-ChildItem .packaging -Directory -Filter "AnyBot-win-*" | Select-Object -First 1
+          if (-not $dir) { throw "Windows package directory not found" }
+          $zip = "$($dir.FullName).zip"
+          Compress-Archive -Force -Path "$($dir.FullName)\*" -DestinationPath $zip
+
+      - name: Zip macOS package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir="$(find .packaging -maxdepth 1 -type d -name 'AnyBot-mac-*' | head -n 1)"
+          test -n "$dir"
+          ditto -c -k --sequesterRsrc --keepParent "$dir" "${dir}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyBot-${{ matrix.platform }}
+          path: .packaging/AnyBot-${{ matrix.platform }}-*.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: AnyBot ${{ github.ref_name }}
+          body: |
+            ## AnyBot Portable Packages
+
+            | 平台 | 文件 |
+            |------|------|
+            | macOS | `AnyBot-mac-*.zip` |
+            | Windows | `AnyBot-win-*.zip` |
+
+            ### 使用说明
+            - **macOS**：解压后双击 `start-anybot.command`，打开 `http://localhost:19981`。
+            - **Windows**：解压后双击 `start-anybot.cmd`，打开 `http://localhost:19981`。
+            - 包内自带 AnyBot 运行用的 Node.js 22；Codex/Gemini/Claude/Cursor/Qoder 等 Provider CLI 仍需用户自行安装并登录。
+          files: release-assets/*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

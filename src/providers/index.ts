@@ -5,8 +5,58 @@ import { GeminiCliProvider } from "./gemini-cli.js";
 import { CursorCliProvider } from "./cursor-cli.js";
 import { QoderCliProvider } from "./qoder-cli.js";
 import { ClaudeCodeProvider } from "./claude-code.js";
+import { resolveExecutable } from "../utils/process.js";
 
 type ProviderFactory = (config?: Record<string, unknown>) => IProvider;
+
+export interface ProviderInstallationStatus {
+  installed: boolean;
+  bin: string;
+  executablePath: string | null;
+  installHint: string;
+}
+
+function dropUndefined(config: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined),
+  );
+}
+
+export function getProviderConfig(type: string): Record<string, unknown> {
+  switch (normalizeProviderType(type)) {
+    case "codex":
+      return dropUndefined({ bin: process.env.CODEX_BIN });
+    case "gemini-cli":
+      return dropUndefined({
+        bin: process.env.GEMINI_CLI_BIN,
+        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || "yolo",
+      });
+    case "cursor-cli":
+      return dropUndefined({
+        bin: process.env.CURSOR_CLI_BIN,
+        workspace: process.env.CURSOR_CLI_WORKSPACE,
+        apiKey: process.env.CURSOR_API_KEY,
+      });
+    case "qoder-cli":
+      return dropUndefined({
+        bin: process.env.QODER_CLI_BIN,
+        maxTurns: process.env.QODER_CLI_MAX_TURNS
+          ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
+          : undefined,
+      });
+    case "claude-code":
+      return dropUndefined({
+        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_BIN,
+        defaultModel: process.env.CLAUDE_AGENT_MODEL,
+        maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
+          ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
+          : undefined,
+        permissionMode: process.env.CLAUDE_AGENT_PERMISSION_MODE,
+      });
+    default:
+      return {};
+  }
+}
 
 const providerFactories: Record<string, ProviderFactory> = {
   codex: (config) => new CodexProvider({ bin: config?.bin as string | undefined }),
@@ -43,6 +93,53 @@ export function getRegisteredProviderTypes(): string[] {
   return Object.keys(providerFactories);
 }
 
+function getProviderBin(type: string, config: Record<string, unknown>): string {
+  switch (normalizeProviderType(type)) {
+    case "codex":
+      return (config.bin as string | undefined) || "codex";
+    case "gemini-cli":
+      return (config.bin as string | undefined) || "gemini";
+    case "cursor-cli":
+      return (config.bin as string | undefined) || "agent";
+    case "qoder-cli":
+      return (config.bin as string | undefined) || "qodercli";
+    case "claude-code":
+      return (config.pathToClaudeCodeExecutable as string | undefined) || "claude";
+    default:
+      return type;
+  }
+}
+
+function getProviderInstallHint(type: string): string {
+  switch (normalizeProviderType(type)) {
+    case "codex":
+      return "npm install -g @openai/codex";
+    case "gemini-cli":
+      return "详见 https://github.com/google-gemini/gemini-cli";
+    case "cursor-cli":
+      return "详见 https://docs.cursor.com/cli";
+    case "qoder-cli":
+      return "详见 https://docs.qoder.com";
+    case "claude-code":
+      return "安装并登录 Claude Code CLI；或设置 CLAUDE_CODE_BIN 指向 claude 可执行文件";
+    default:
+      return "";
+  }
+}
+
+export function getProviderInstallationStatus(type: string): ProviderInstallationStatus {
+  const normalizedType = normalizeProviderType(type);
+  const config = getProviderConfig(normalizedType);
+  const bin = getProviderBin(normalizedType, config);
+  const executablePath = resolveExecutable(bin);
+  return {
+    installed: executablePath !== null,
+    bin,
+    executablePath,
+    installHint: getProviderInstallHint(normalizedType),
+  };
+}
+
 export function createProvider(type: string, config?: Record<string, unknown>): IProvider {
   const normalizedType = normalizeProviderType(type);
   const factory = providerFactories[normalizedType];
@@ -51,7 +148,11 @@ export function createProvider(type: string, config?: Record<string, unknown>): 
       `不支持的 Provider: ${type}。可用: ${Object.keys(providerFactories).join(", ")}`,
     );
   }
-  return factory(config);
+  const mergedConfig = {
+    ...getProviderConfig(normalizedType),
+    ...dropUndefined(config || {}),
+  };
+  return factory(mergedConfig);
 }
 
 let currentProvider: IProvider | null = null;
