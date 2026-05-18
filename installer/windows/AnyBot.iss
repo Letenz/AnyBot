@@ -37,7 +37,7 @@ Name: "{group}\AnyBot"; Filename: "{app}\start-anybot.vbs"; WorkingDir: "{app}"
 Name: "{group}\打开 AnyBot Web UI"; Filename: "http://localhost:19981"
 Name: "{group}\停止 AnyBot"; Filename: "{app}\stop-anybot.cmd"; WorkingDir: "{app}"
 Name: "{group}\卸载 AnyBot"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\AnyBot"; Filename: "{app}\start-anybot.vbs"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userdesktop}\AnyBot"; Filename: "{app}\start-anybot.vbs"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\start-anybot.vbs"; Description: "启动 AnyBot"; Flags: nowait postinstall skipifsilent

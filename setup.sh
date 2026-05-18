@@ -316,7 +316,7 @@ QODER_CLI_BIN=qodercli
 QODER_CLI_MAX_TURNS=
 
 # ── Claude Code ────────────────────────────────────
-CLAUDE_CODE_BIN=claude
+CLAUDE_CODE_BIN=
 # 可选：只在你想改用 API Key 认证时启用
 # ANTHROPIC_API_KEY=
 CLAUDE_AGENT_MODEL=

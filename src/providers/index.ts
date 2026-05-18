@@ -22,6 +22,12 @@ function dropUndefined(config: Record<string, unknown>): Record<string, unknown>
   );
 }
 
+function getClaudeCodeBin(): string | undefined {
+  const bin = process.env.CLAUDE_CODE_BIN?.trim();
+  if (!bin || bin === "claude") return undefined;
+  return bin;
+}
+
 export function getProviderConfig(type: string): Record<string, unknown> {
   switch (normalizeProviderType(type)) {
     case "codex":
@@ -46,7 +52,7 @@ export function getProviderConfig(type: string): Record<string, unknown> {
       });
     case "claude-code":
       return dropUndefined({
-        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_BIN,
+        pathToClaudeCodeExecutable: getClaudeCodeBin(),
         defaultModel: process.env.CLAUDE_AGENT_MODEL,
         maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
           ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)

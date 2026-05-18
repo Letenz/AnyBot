@@ -498,13 +498,13 @@ AnyBot 已在代码层面做了处理——在 Linux 上会自动以 `--sandbox 
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `CLAUDE_CODE_BIN` | `claude` | 本机 `claude` 可执行文件路径，默认使用已登录的 Claude Code CLI |
+| `CLAUDE_CODE_BIN` | — | 可选；留空使用 SDK 随包安装的 Claude Code native binary。需要指定外部 CLI 时填写可执行文件完整路径 |
 | `ANTHROPIC_API_KEY` | — | 可选；只在你想改用 API Key 认证时启用 |
 | `CLAUDE_AGENT_MODEL` | — | 覆盖使用的模型 |
 | `CLAUDE_AGENT_PERMISSION_MODE` | — | 覆盖权限模式：`default` / `acceptEdits` / `bypassPermissions` / `plan` / `dontAsk` / `auto` |
 | `CLAUDE_AGENT_MAX_TURNS` | — | 最大 Agent 循环轮数 |
 
-注意：SDK 会执行 `CLAUDE_CODE_BIN` 指向的可执行文件，不会读取 shell function 或 alias。如果你的 `claude` 是 shell function 包装器，请把同等逻辑保存成脚本，并将 `CLAUDE_CODE_BIN` 指向该脚本。
+注意：设置 `CLAUDE_CODE_BIN` 后，SDK 会执行它指向的可执行文件，不会读取 shell function 或 alias。如果你的 `claude` 是 shell function 包装器，请把同等逻辑保存成脚本，并将 `CLAUDE_CODE_BIN` 指向该脚本。
 
 ---
 
