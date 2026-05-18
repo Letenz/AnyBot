@@ -1516,6 +1516,7 @@
 
         const SETTINGS_TAB_META = {
             general: ['常规', '外观主题和默认权限'],
+            network: ['网络', '代理服务器和出站连接配置'],
             provider: ['提供商', '提供商配置'],
             workspace: ['工作区', '默认工作目录和项目入口'],
             privacy: ['隐私与日志', '日志目录和清理操作'],
@@ -1614,6 +1615,7 @@
                     (appSettingsPayload && appSettingsPayload.effective && appSettingsPayload.effective.workdir) ||
                     '';
             }
+            renderNetworkSettings();
             renderSettingsProviderDetails();
         }
 
@@ -1630,6 +1632,7 @@
             });
             if (settingsTitle) settingsTitle.textContent = SETTINGS_TAB_META[tab][0];
             if (settingsSubtitle) settingsSubtitle.textContent = SETTINGS_TAB_META[tab][1];
+            if (tab === 'network') renderNetworkSettings();
         }
 
         settingsNavItems.forEach(function (item) {
@@ -2217,6 +2220,19 @@
             settingsImportDataBtn.addEventListener('click', function () { settingsImportFile.click(); });
             settingsImportFile.addEventListener('change', importSettingsFile);
         }
+        var proxyAuthToggle = document.getElementById('proxy-auth-toggle');
+        if (proxyAuthToggle) {
+            proxyAuthToggle.addEventListener('click', function () {
+                var fields = document.getElementById('proxy-auth-fields');
+                if (!fields) return;
+                var showing = fields.classList.toggle('show');
+                this.textContent = showing ? '隐藏认证' : '认证（可选）';
+            });
+        }
+        var proxySaveBtn = document.getElementById('proxy-save-btn');
+        if (proxySaveBtn) proxySaveBtn.addEventListener('click', saveProxyConfig);
+        var proxyTestBtn = document.getElementById('proxy-test-btn');
+        if (proxyTestBtn) proxyTestBtn.addEventListener('click', testProxyConnection);
 
         async function runSettingsAction(url, method, successMessage) {
             try {
@@ -2284,10 +2300,8 @@
         const chatView = document.getElementById('chat-view');
         const channelView = document.getElementById('channel-view');
         const skillsView = document.getElementById('skills-view');
-        const proxyView = document.getElementById('proxy-view');
         const channelsBtn = document.getElementById('channels-btn');
         const skillsBtn = document.getElementById('skills-btn');
-        const proxyBtn = document.getElementById('proxy-btn');
 
         const CHANNEL_META = {
             web: {name: '本地', icon: '本', iconClass: 'web', badge: '本地'},
@@ -2312,12 +2326,10 @@
             chatView.style.display = 'none';
             channelView.style.display = 'none';
             skillsView.style.display = 'none';
-            proxyView.style.display = 'none';
             settingsView.style.display = 'none';
             newChatBtn.classList.remove('active');
             channelsBtn.classList.remove('active');
             skillsBtn.classList.remove('active');
-            proxyBtn.classList.remove('active');
             settingsBtn.classList.remove('active');
         }
 
@@ -2366,133 +2378,38 @@
             });
         });
 
-        proxyBtn.addEventListener('click', function () {
-            if (currentView === 'proxy') return;
-            showProxyPage();
-        });
-
-        function showProxyPage() {
-            hideAllViews();
-            currentView = 'proxy';
-            proxyView.style.display = 'flex';
-            proxyBtn.classList.add('active');
-            renderHistory();
-            renderProxyView();
-        }
-
         var proxyConfig = null;
 
         async function fetchProxyConfig() {
             try {
                 var res = await fetch('/api/proxy');
                 proxyConfig = await res.json();
+                renderNetworkSettings();
             } catch (e) {
                 console.error('Failed to fetch proxy config:', e);
             }
         }
 
-        function renderProxyView() {
-            proxyView.innerHTML = '';
-
-            var page = document.createElement('div');
-            page.className = 'proxy-page';
-
-            var header = document.createElement('div');
-            header.className = 'proxy-page-header';
-            header.innerHTML =
-                '<div class="proxy-page-header-top">' +
-                '<div class="proxy-page-header-icon">' +
-                '<svg width="20" height="20" viewBox="0 0 14 14" fill="none"><path d="M7 1C4.24 1 2 3.24 2 6c0 1.86 1.02 3.49 2.53 4.35L4 12.5h6l-.53-2.15C10.98 9.49 12 7.86 12 6c0-2.76-2.24-5-5-5z" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="6" r="1.5" stroke="currentColor" stroke-width="1.1"/></svg>' +
-                '</div>' +
-                '<div>' +
-                '<div class="proxy-page-title">代理设置</div>' +
-                '<div class="proxy-page-subtitle">配置网络代理，让所有请求通过代理服务器</div>' +
-                '</div>' +
-                '</div>';
-            page.appendChild(header);
-
+        function renderNetworkSettings() {
             var cfg = proxyConfig || { enabled: false, protocol: 'http', host: '127.0.0.1', port: 7890 };
-
-            var card = document.createElement('div');
-            card.className = 'proxy-card';
-
             var hasAuth = !!(cfg.username || cfg.password);
-
-            card.innerHTML =
-                '<div class="proxy-card-title">' +
-                '<span>代理配置</span>' +
-                '</div>' +
-                '<div class="proxy-toggle-row">' +
-                '<div>' +
-                '<div class="proxy-toggle-label">启用代理</div>' +
-                '<div class="proxy-toggle-hint">开启后所有出站请求都会通过代理</div>' +
-                '</div>' +
-                '<label class="proxy-toggle">' +
-                '<input type="checkbox" id="proxy-enabled" ' + (cfg.enabled ? 'checked' : '') + '>' +
-                '<span class="proxy-toggle-slider"></span>' +
-                '</label>' +
-                '</div>' +
-                '<div style="height:18px"></div>' +
-                '<div class="proxy-row">' +
-                '<div class="proxy-field">' +
-                '<label class="proxy-field-label">协议</label>' +
-                '<select class="proxy-field-select" id="proxy-protocol">' +
-                '<option value="http"' + (cfg.protocol === 'http' ? ' selected' : '') + '>HTTP</option>' +
-                '<option value="socks5"' + (cfg.protocol === 'socks5' ? ' selected' : '') + '>SOCKS5</option>' +
-                '</select>' +
-                '</div>' +
-                '<div class="proxy-field">' +
-                '<label class="proxy-field-label">地址</label>' +
-                '<input class="proxy-field-input" id="proxy-host" type="text" value="' + escapeHtml(cfg.host || '') + '" placeholder="127.0.0.1" spellcheck="false">' +
-                '</div>' +
-                '<div class="proxy-field port">' +
-                '<label class="proxy-field-label">端口</label>' +
-                '<input class="proxy-field-input" id="proxy-port" type="number" value="' + (cfg.port || '') + '" placeholder="7890" min="1" max="65535">' +
-                '</div>' +
-                '</div>' +
-                '<button class="proxy-auth-toggle" id="proxy-auth-toggle">' + (hasAuth ? '隐藏认证' : '认证（可选）') + '</button>' +
-                '<div class="proxy-auth-fields' + (hasAuth ? ' show' : '') + '" id="proxy-auth-fields">' +
-                '<div class="proxy-row">' +
-                '<div class="proxy-field">' +
-                '<label class="proxy-field-label">用户名</label>' +
-                '<input class="proxy-field-input" id="proxy-username" type="text" value="' + escapeHtml(cfg.username || '') + '" placeholder="留空则不使用认证" spellcheck="false">' +
-                '</div>' +
-                '<div class="proxy-field">' +
-                '<label class="proxy-field-label">密码</label>' +
-                '<input class="proxy-field-input" id="proxy-password" type="password" value="' + escapeHtml(cfg.password || '') + '" placeholder="留空则不使用认证">' +
-                '</div>' +
-                '</div>' +
-                '</div>' +
-                '<div class="proxy-actions">' +
-                '<button class="proxy-save-btn" id="proxy-save-btn">保存</button>' +
-                '<button class="proxy-test-btn" id="proxy-test-btn">测试连接</button>' +
-                '</div>' +
-                '<div class="proxy-status" id="proxy-status"></div>';
-
-            page.appendChild(card);
-
-            var tipsCard = document.createElement('div');
-            tipsCard.className = 'proxy-card';
-            tipsCard.innerHTML =
-                '<div class="proxy-card-title">常见代理软件端口</div>' +
-                '<div style="font-size:12px;color:var(--text-muted);line-height:2">' +
-                'Clash / ClashX — HTTP <code style="color:var(--text);background:var(--bg);padding:2px 6px;border-radius:4px;font-family:JetBrains Mono,monospace">7890</code> · SOCKS5 <code style="color:var(--text);background:var(--bg);padding:2px 6px;border-radius:4px;font-family:JetBrains Mono,monospace">7891</code><br>' +
-                'V2rayN — HTTP <code style="color:var(--text);background:var(--bg);padding:2px 6px;border-radius:4px;font-family:JetBrains Mono,monospace">10809</code> · SOCKS5 <code style="color:var(--text);background:var(--bg);padding:2px 6px;border-radius:4px;font-family:JetBrains Mono,monospace">10808</code><br>' +
-                'Shadowsocks — HTTP <code style="color:var(--text);background:var(--bg);padding:2px 6px;border-radius:4px;font-family:JetBrains Mono,monospace">1082</code><br>' +
-                'Surge — HTTP <code style="color:var(--text);background:var(--bg);padding:2px 6px;border-radius:4px;font-family:JetBrains Mono,monospace">6152</code> · SOCKS5 <code style="color:var(--text);background:var(--bg);padding:2px 6px;border-radius:4px;font-family:JetBrains Mono,monospace">6153</code>' +
-                '</div>';
-            page.appendChild(tipsCard);
-
-            proxyView.appendChild(page);
-
-            document.getElementById('proxy-auth-toggle').addEventListener('click', function () {
-                var fields = document.getElementById('proxy-auth-fields');
-                var showing = fields.classList.toggle('show');
-                this.textContent = showing ? '隐藏认证' : '认证（可选）';
-            });
-
-            document.getElementById('proxy-save-btn').addEventListener('click', saveProxyConfig);
-            document.getElementById('proxy-test-btn').addEventListener('click', testProxyConnection);
+            var enabled = document.getElementById('proxy-enabled');
+            var protocol = document.getElementById('proxy-protocol');
+            var host = document.getElementById('proxy-host');
+            var port = document.getElementById('proxy-port');
+            var username = document.getElementById('proxy-username');
+            var password = document.getElementById('proxy-password');
+            var authFields = document.getElementById('proxy-auth-fields');
+            var authToggle = document.getElementById('proxy-auth-toggle');
+            if (!enabled || !protocol || !host || !port || !username || !password) return;
+            enabled.checked = !!cfg.enabled;
+            protocol.value = cfg.protocol || 'http';
+            host.value = cfg.host || '';
+            port.value = cfg.port || '';
+            username.value = cfg.username || '';
+            password.value = cfg.password || '';
+            if (authFields) authFields.classList.toggle('show', hasAuth);
+            if (authToggle) authToggle.textContent = hasAuth ? '隐藏认证' : '认证（可选）';
         }
 
         async function saveProxyConfig() {

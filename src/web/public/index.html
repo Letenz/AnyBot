@@ -53,13 +53,6 @@
             </svg>
             技能
         </button>
-        <button id="proxy-btn">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <path d="M7 1C4.24 1 2 3.24 2 6c0 1.86 1.02 3.49 2.53 4.35L4 12.5h6l-.53-2.15C10.98 9.49 12 7.86 12 6c0-2.76-2.24-5-5-5z" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
-                <circle cx="7" cy="6" r="1.5" stroke="currentColor" stroke-width="1.1"/>
-            </svg>
-            代理
-        </button>
     </div>
 
     <div class="sidebar-section">
@@ -168,13 +161,12 @@
 
     <div id="channel-view" style="display:none;"></div>
     <div id="skills-view" style="display:none;"></div>
-    <div id="proxy-view" style="display:none;"></div>
-
     <div id="settings-view" class="settings-view" style="display:none;">
         <section class="settings-panel" role="region" aria-labelledby="settings-title">
         <aside class="settings-sidebar" aria-label="设置分组">
             <div class="settings-nav" role="tablist" aria-label="设置分组">
                 <button class="settings-nav-item active" type="button" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
+                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="network">网络</button>
                 <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="provider">提供商</button>
                 <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="workspace">工作区</button>
                 <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="privacy">隐私与日志</button>
@@ -226,6 +218,68 @@
                                 <div class="settings-combobox-menu" id="settings-provider-menu" role="listbox" aria-labelledby="settings-provider-label"></div>
                             </div>
                             <select class="settings-select" id="settings-provider-select" aria-hidden="true" tabindex="-1"></select>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="settings-tab-panel" data-settings-panel="network" role="tabpanel">
+                    <div class="settings-section-card">
+                        <div class="settings-section-title">代理</div>
+                        <div class="settings-network-card">
+                            <div class="proxy-toggle-row">
+                                <div>
+                                    <div class="proxy-toggle-label">启用代理</div>
+                                    <div class="proxy-toggle-hint">开启后所有出站请求都会通过代理服务器</div>
+                                </div>
+                                <label class="proxy-toggle">
+                                    <input type="checkbox" id="proxy-enabled">
+                                    <span class="proxy-toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="settings-network-grid">
+                                <div class="proxy-field">
+                                    <label class="proxy-field-label" for="proxy-protocol">协议</label>
+                                    <select class="proxy-field-select" id="proxy-protocol">
+                                        <option value="http">HTTP</option>
+                                        <option value="socks5">SOCKS5</option>
+                                    </select>
+                                </div>
+                                <div class="proxy-field">
+                                    <label class="proxy-field-label" for="proxy-host">地址</label>
+                                    <input class="proxy-field-input" id="proxy-host" type="text" placeholder="127.0.0.1" spellcheck="false">
+                                </div>
+                                <div class="proxy-field port">
+                                    <label class="proxy-field-label" for="proxy-port">端口</label>
+                                    <input class="proxy-field-input" id="proxy-port" type="number" placeholder="7890" min="1" max="65535">
+                                </div>
+                            </div>
+                            <button class="proxy-auth-toggle" id="proxy-auth-toggle" type="button">认证（可选）</button>
+                            <div class="proxy-auth-fields" id="proxy-auth-fields">
+                                <div class="settings-network-grid auth">
+                                    <div class="proxy-field">
+                                        <label class="proxy-field-label" for="proxy-username">用户名</label>
+                                        <input class="proxy-field-input" id="proxy-username" type="text" placeholder="留空则不使用认证" spellcheck="false">
+                                    </div>
+                                    <div class="proxy-field">
+                                        <label class="proxy-field-label" for="proxy-password">密码</label>
+                                        <input class="proxy-field-input" id="proxy-password" type="password" placeholder="留空则不使用认证">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="proxy-actions">
+                                <button class="proxy-save-btn" id="proxy-save-btn" type="button">保存</button>
+                                <button class="proxy-test-btn" id="proxy-test-btn" type="button">测试连接</button>
+                            </div>
+                            <div class="proxy-status" id="proxy-status"></div>
+                        </div>
+                    </div>
+                    <div class="settings-section-card">
+                        <div class="settings-section-title">参考端口</div>
+                        <div class="settings-port-list">
+                            <div><span>Clash / ClashX</span><code>HTTP 7890</code><code>SOCKS5 7891</code></div>
+                            <div><span>V2rayN</span><code>HTTP 10809</code><code>SOCKS5 10808</code></div>
+                            <div><span>Shadowsocks</span><code>HTTP 1082</code></div>
+                            <div><span>Surge</span><code>HTTP 6152</code><code>SOCKS5 6153</code></div>
                         </div>
                     </div>
                 </section>

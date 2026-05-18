@@ -247,42 +247,6 @@
             flex-shrink: 0;
         }
 
-        #proxy-btn {
-            width: 100%;
-            background: transparent;
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            color: var(--text-muted);
-            padding: 9px 14px;
-            cursor: pointer;
-            font-family: 'Sora', sans-serif;
-            font-size: 13px;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            transition: all 0.18s ease;
-            letter-spacing: 0.01em;
-            margin-top: 6px;
-        }
-
-        #proxy-btn:hover {
-            background: var(--sidebar-hover);
-            color: var(--text);
-            border-color: rgba(124, 111, 247, 0.25);
-        }
-
-        #proxy-btn.active {
-            background: var(--accent-dim);
-            border-color: rgba(124, 111, 247, 0.35);
-            color: var(--text);
-            box-shadow: 0 0 16px var(--accent-glow);
-        }
-
-        #proxy-btn svg {
-            flex-shrink: 0;
-        }
-
         .sidebar-section {
             flex-shrink: 0;
         }
@@ -1352,6 +1316,8 @@
         }
 
         .settings-section-card > .settings-field,
+        .settings-section-card > .settings-network-card,
+        .settings-section-card > .settings-port-list,
         .settings-section-card > .settings-path-row,
         .settings-section-card > .settings-button-row,
         .settings-section-card > .settings-danger-btn,
@@ -1577,6 +1543,15 @@
             .settings-inline-select {
                 width: 100%;
                 min-width: 0;
+            }
+
+            .settings-network-grid,
+            .settings-network-grid.auth {
+                grid-template-columns: 1fr;
+            }
+
+            .proxy-actions {
+                flex-direction: column;
             }
         }
 
@@ -2967,11 +2942,6 @@
             flex-direction: column;
         }
 
-        #proxy-view {
-            flex: 1;
-            overflow-y: auto;
-        }
-
         .skills-page {
             flex: 1;
             display: flex;
@@ -3378,65 +3348,58 @@
             text-align: center;
         }
 
-        /* ── Proxy page ── */
-        .proxy-page {
-            padding: 28px 32px 16px;
-            width: 100%;
-            max-width: 880px;
-            box-sizing: border-box;
+        /* ── Network settings ── */
+        .settings-network-card {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
         }
 
-        .proxy-page-header {
-            margin-bottom: 18px;
+        .settings-network-grid {
+            display: grid;
+            grid-template-columns: minmax(120px, 0.7fr) minmax(220px, 1.6fr) minmax(110px, 0.7fr);
+            gap: 12px;
+            align-items: end;
         }
 
-        .proxy-page-header-top {
+        .settings-network-grid.auth {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            align-items: end;
+        }
+
+        .settings-network-grid .proxy-field {
+            margin-bottom: 0;
+        }
+
+        .settings-port-list {
+            display: grid;
+            gap: 10px;
+        }
+
+        .settings-port-list div {
+            min-height: 40px;
             display: flex;
             align-items: center;
-            gap: 14px;
-        }
-
-        .proxy-page-header-icon {
-            width: 44px;
-            height: 44px;
-            border-radius: 12px;
-            background: var(--accent-dim);
-            border: 1px solid rgba(124, 111, 247, 0.2);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: var(--accent);
-            flex-shrink: 0;
-        }
-
-        .proxy-page-title {
-            font-size: 20px;
-            font-weight: 600;
-            color: var(--text);
-        }
-
-        .proxy-page-subtitle {
-            font-size: 13px;
+            gap: 8px;
             color: var(--text-muted);
-            margin-top: 2px;
+            font-size: 12px;
+            flex-wrap: wrap;
         }
 
-        .proxy-card {
-            background: var(--sidebar);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 24px;
-            margin-bottom: 16px;
-        }
-
-        .proxy-card-title {
-            font-size: 13px;
-            font-weight: 600;
+        .settings-port-list span {
+            min-width: 132px;
             color: var(--text);
-            margin-bottom: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
+            font-weight: 600;
+        }
+
+        .settings-port-list code {
+            color: var(--text);
+            background: var(--input-bg);
+            border: 1px solid var(--border);
+            padding: 3px 7px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
         }
 
         .proxy-field {
@@ -3474,19 +3437,6 @@
 
         .proxy-field-input::placeholder {
             color: var(--text-dim);
-        }
-
-        .proxy-row {
-            display: flex;
-            gap: 12px;
-        }
-
-        .proxy-row .proxy-field {
-            flex: 1;
-        }
-
-        .proxy-row .proxy-field.port {
-            flex: 0 0 120px;
         }
 
         .proxy-field-select {
@@ -3578,7 +3528,7 @@
         .proxy-actions {
             display: flex;
             gap: 10px;
-            margin-top: 20px;
+            margin-top: 2px;
         }
 
         .proxy-save-btn {
