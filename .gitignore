@@ -1,6 +1,7 @@
 node_modules
 .env
 dist
+.packaging/
 .DS_Store
 .idea/
 .run/
