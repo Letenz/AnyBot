@@ -5,6 +5,8 @@ dist
 release-assets
 dist-electron
 .electron-builder-cache
+build/icons/*.iconset
+build/icons/*.tiff
 .DS_Store
 .idea/
 .run/

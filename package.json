@@ -74,7 +74,7 @@
       "target": [
         "dmg"
       ],
-      "icon": null
+      "icon": "build/icons/icon.icns"
     },
     "win": {
       "target": [
@@ -85,7 +85,7 @@
           ]
         }
       ],
-      "icon": null
+      "icon": "build/icons/icon.ico"
     },
     "nsis": {
       "oneClick": false,
