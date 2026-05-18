@@ -2,7 +2,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 exports.default = async function afterPack(context) {
-  const resourcesDir = context.packager.platform.name === "mac"
+  const targetPlatform = context.packager.platform.name;
+  const resourcesDir = targetPlatform === "mac"
     ? path.join(
         context.appOutDir,
         `${context.packager.appInfo.productFilename}.app`,
@@ -14,10 +15,10 @@ exports.default = async function afterPack(context) {
   const nodeDir = path.join(resourcesDir, "node");
   fs.mkdirSync(nodeDir, { recursive: true });
 
-  const target = path.join(nodeDir, process.platform === "win32" ? "node.exe" : "node");
+  const target = path.join(nodeDir, targetPlatform === "windows" ? "node.exe" : "node");
   fs.copyFileSync(process.execPath, target);
 
-  if (process.platform !== "win32") {
+  if (targetPlatform !== "windows") {
     fs.chmodSync(target, 0o755);
   }
 

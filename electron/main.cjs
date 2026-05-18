@@ -8,6 +8,7 @@ const { spawn } = require("node:child_process");
 let mainWindow = null;
 let backendProcess = null;
 let logStream = null;
+let logFilePath = null;
 
 const DEFAULT_WEB_PORT = 19981;
 
@@ -24,6 +25,7 @@ function initLog() {
   ensureDir(runDir);
 
   const logFile = path.join(runDir, "desktop.log");
+  logFilePath = logFile;
   logStream = fs.createWriteStream(logFile, { flags: "a" });
   writeLog("main", `AnyBot desktop starting (${process.platform} ${process.arch})`);
 }
@@ -121,11 +123,17 @@ function buildPathEnv(existingPath) {
   return [...new Set(entries.filter(Boolean))].join(path.delimiter);
 }
 
-function waitForServer(port, timeoutMs = 15000) {
+function waitForServer(port, timeoutMs = 15000, getAbortMessage = () => null) {
   const deadline = Date.now() + timeoutMs;
 
   return new Promise((resolve, reject) => {
     const check = () => {
+      const abortMessage = getAbortMessage();
+      if (abortMessage) {
+        reject(new Error(abortMessage));
+        return;
+      }
+
       const req = http.get(`http://127.0.0.1:${port}`, (res) => {
         res.resume();
         resolve();
@@ -186,6 +194,7 @@ async function startBackend() {
   }
 
   const nodeRuntime = resolveNodeRuntime();
+  let backendExitMessage = null;
   const backendEnv = {
     ...process.env,
     ANYBOT_DESKTOP: "1",
@@ -209,14 +218,27 @@ async function startBackend() {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  backendProcess.on("error", (error) => {
+    backendExitMessage = `Backend failed to launch: ${error.message}`;
+    writeLog("backend:error", error.stack || error.message);
+  });
   backendProcess.stdout.on("data", (data) => writeLog("backend", data.toString().trim()));
   backendProcess.stderr.on("data", (data) => writeLog("backend:error", data.toString().trim()));
   backendProcess.on("exit", (code, signal) => {
+    backendExitMessage = `Backend exited before the web server started (code=${code}, signal=${signal}).`;
     writeLog("backend", `exited code=${code} signal=${signal}`);
     backendProcess = null;
   });
 
-  await waitForServer(resolveWebPort());
+  await waitForServer(resolveWebPort(), 15000, () => {
+    if (!backendExitMessage) {
+      return null;
+    }
+
+    return logFilePath
+      ? `${backendExitMessage}\n\nLog file: ${logFilePath}`
+      : backendExitMessage;
+  });
 }
 
 function createMenu() {
