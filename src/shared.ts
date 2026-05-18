@@ -1,18 +1,9 @@
 import type { SandboxMode } from "./types.js";
-import { sandboxModes } from "./types.js";
+import { getDefaultSandbox } from "./sandbox-config.js";
 import { buildSystemPrompt } from "./prompt.js";
 
-const sandboxRaw = process.env.CODEX_SANDBOX || "read-only";
 const workdir = process.env.CODEX_WORKDIR || process.cwd();
 const extraSystemPrompt = process.env.CODEX_SYSTEM_PROMPT;
-
-if (!sandboxModes.includes(sandboxRaw as SandboxMode)) {
-  throw new Error(
-    `CODEX_SANDBOX 配置无效：${sandboxRaw}。可选值只有：${sandboxModes.join("、")}`,
-  );
-}
-
-const sandbox = sandboxRaw as SandboxMode;
 
 function getSystemPrompt(opts?: {
   workdir?: string;
@@ -21,7 +12,7 @@ function getSystemPrompt(opts?: {
 }): string {
   return buildSystemPrompt({
     workdir: opts?.workdir || workdir,
-    sandbox: opts?.sandbox || sandbox,
+    sandbox: opts?.sandbox || getDefaultSandbox(),
     extraPrompt: extraSystemPrompt,
     includeWorkspaceMemory: opts?.includeWorkspaceMemory,
   });
@@ -75,5 +66,5 @@ export function getWorkdir(): string {
 }
 
 export function getSandbox(): SandboxMode {
-  return sandbox;
+  return getDefaultSandbox();
 }

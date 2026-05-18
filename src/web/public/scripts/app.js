@@ -63,6 +63,7 @@
         const settingsProviderCurrent = document.getElementById('settings-provider-current');
         const settingsProviderMenu = document.getElementById('settings-provider-menu');
         const settingsThemeGroup = document.getElementById('settings-theme-group');
+        const settingsSandboxGroup = document.getElementById('settings-sandbox-group');
         const contextUsageEl = document.getElementById('context-usage');
         const contextUsageRingEl = document.getElementById('context-usage-ring');
         const contextUsagePercentEl = document.getElementById('context-usage-percent');
@@ -78,6 +79,8 @@
         let projects = [];
         let modelConfig = null;
         let providerData = null;
+        let sandboxConfig = null;
+        let selectedSandbox = null;
         let latestContextUsage = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
@@ -1486,6 +1489,79 @@
             }
         }
 
+        async function fetchSandboxConfig() {
+            try {
+                var res = await fetch('/api/sandbox-config');
+                sandboxConfig = await res.json();
+                selectedSandbox = sandboxConfig.defaultSandbox;
+                renderSandboxOptions();
+            } catch (e) {
+                console.error('Failed to fetch sandbox config:', e);
+            }
+        }
+
+        function renderSandboxOptions() {
+            if (!settingsSandboxGroup || !sandboxConfig) return;
+            settingsSandboxGroup.innerHTML = '';
+            sandboxConfig.modes.forEach(function (mode) {
+                var button = document.createElement('button');
+                var isActive = mode.id === selectedSandbox;
+                button.className = 'sandbox-option' + (isActive ? ' active' : '');
+                button.type = 'button';
+                button.setAttribute('role', 'radio');
+                button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+                button.dataset.sandboxValue = mode.id;
+                button.innerHTML =
+                    '<span class="sandbox-option-name">' + escapeHtml(mode.name) + '</span>' +
+                    '<span class="sandbox-option-desc">' + escapeHtml(mode.description) + '</span>';
+                button.addEventListener('click', function () {
+                    setSettingsSandboxValue(mode.id);
+                });
+                settingsSandboxGroup.appendChild(button);
+            });
+        }
+
+        function setSettingsSandboxValue(sandbox) {
+            if (!sandboxConfig || !settingsSandboxGroup) return false;
+            var valid = sandboxConfig.modes.some(function (mode) {
+                return mode.id === sandbox;
+            });
+            if (!valid) {
+                showError('该权限模式不可用');
+                return false;
+            }
+            selectedSandbox = sandbox;
+            Array.prototype.forEach.call(settingsSandboxGroup.querySelectorAll('.sandbox-option'), function (button) {
+                var isActive = button.dataset.sandboxValue === selectedSandbox;
+                button.classList.toggle('active', isActive);
+                button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+            });
+            return true;
+        }
+
+        async function persistSandboxConfig() {
+            if (!sandboxConfig || !selectedSandbox || selectedSandbox === sandboxConfig.defaultSandbox) return true;
+            try {
+                var res = await fetch('/api/sandbox-config', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({defaultSandbox: selectedSandbox}),
+                });
+                if (!res.ok) {
+                    var err = await res.json().catch(function () { return {}; });
+                    showError(err.error || '保存权限配置失败');
+                    return false;
+                }
+                sandboxConfig = await res.json();
+                selectedSandbox = sandboxConfig.defaultSandbox;
+                renderSandboxOptions();
+                return true;
+            } catch (e) {
+                showError('保存权限配置失败');
+                return false;
+            }
+        }
+
         function renderProviderSelect() {
             if (!providerData || !settingsProviderSelect) return;
             settingsProviderSelect.innerHTML = '';
@@ -1643,6 +1719,10 @@
 
         function openSettingsPanel() {
             if (providerData) renderProviderSelect();
+            if (sandboxConfig) {
+                selectedSandbox = sandboxConfig.defaultSandbox;
+                renderSandboxOptions();
+            }
             settingsOverlay.classList.add('open');
             settingsOverlay.setAttribute('aria-hidden', 'false');
             settingsBtn.classList.add('active');
@@ -1666,13 +1746,25 @@
                 showError('该 Provider 未安装，无法保存');
                 return;
             }
-            await switchProviderTo(settingsProviderSelect.value, { closeOnSuccess: true });
+            var originalText = settingsSaveBtn.textContent;
+            settingsSaveBtn.disabled = true;
+            settingsSaveBtn.textContent = '保存中…';
+            try {
+                var sandboxSaved = await persistSandboxConfig();
+                if (!sandboxSaved) return;
+                var providerSaved = await switchProviderTo(settingsProviderSelect.value, { closeOnSuccess: false });
+                if (!providerSaved) return;
+                closeSettingsPanel();
+            } finally {
+                settingsSaveBtn.disabled = false;
+                settingsSaveBtn.textContent = originalText;
+            }
         }
 
         async function switchProviderTo(providerType, opts) {
             if (!providerData || providerType === providerData.current) {
                 if (opts && opts.closeOnSuccess) closeSettingsPanel();
-                return;
+                return true;
             }
             var shouldClose = !!(opts && opts.closeOnSuccess);
             var originalText = settingsSaveBtn.textContent;
@@ -1689,7 +1781,7 @@
                 if (!res.ok) {
                     var err = await res.json().catch(function () { return {}; });
                     showError(err.error || '切换 Provider 失败');
-                    return;
+                    return false;
                 }
                 var switchedConfig = await res.json();
                 providerData.current = providerType;
@@ -1702,8 +1794,10 @@
                 renderProviderSelect();
                 renderModelDropdown();
                 if (shouldClose) closeSettingsPanel();
+                return true;
             } catch (e) {
                 showError('切换 Provider 失败');
+                return false;
             } finally {
                 if (shouldClose) {
                     settingsSaveBtn.disabled = false;
@@ -2727,7 +2821,7 @@
         async function init() {
             updateProjectsCollapsedState();
             updateHistoryCollapsedState();
-            await Promise.all([fetchProjects(), fetchSessions(), fetchModelConfig(), fetchProviders(), fetchProxyConfig()]);
+            await Promise.all([fetchProjects(), fetchSessions(), fetchModelConfig(), fetchProviders(), fetchSandboxConfig(), fetchProxyConfig()]);
             if (sessions.length > 0) {
                 await loadSession(sessions[0].id);
             } else {

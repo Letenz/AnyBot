@@ -18,6 +18,7 @@ import {
   setCurrentProvider,
   getProviderTypes,
 } from "./model-config.js";
+import { readSandboxConfig, sandboxModeOptions, setDefaultSandbox } from "../sandbox-config.js";
 import {
   readChannelsConfig,
   updateChannelConfig,
@@ -219,14 +220,48 @@ function isFolderPickerCanceled(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { code?: unknown; message?: unknown; stderr?: unknown };
   const text = `${String(candidate.message || "")}\n${String(candidate.stderr || "")}`;
-  return text.includes("(-128)") || text.includes("用户已取消") || text.includes("User canceled") || text.includes("User cancelled");
+  return candidate.code === 2 || text.includes("(-128)") || text.includes("用户已取消") || text.includes("User canceled") || text.includes("User cancelled");
 }
 
 async function pickProjectFolder(): Promise<string | null> {
+  let stdout = "";
+
+  if (process.platform === "win32") {
+    const script = [
+      "Add-Type -AssemblyName System.Windows.Forms",
+      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+      "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
+      "$dialog.Description = '选择项目文件夹'",
+      "$dialog.ShowNewFolderButton = $true",
+      "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {",
+      "  [Console]::Out.WriteLine($dialog.SelectedPath)",
+      "  exit 0",
+      "}",
+      "exit 2",
+    ].join("\n");
+    try {
+      const result = await execFile("powershell.exe", [
+        "-NoProfile",
+        "-STA",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+      ]);
+      stdout = result.stdout;
+    } catch (error) {
+      if (isFolderPickerCanceled(error)) {
+        return null;
+      }
+      throw error;
+    }
+    return stdout.trim();
+  }
+
   if (process.platform !== "darwin") {
     throw new Error("当前系统暂不支持从浏览器唤起本地文件夹选择器");
   }
-  let stdout = "";
+
   try {
     const result = await execFile("osascript", [
       "-e",
@@ -491,6 +526,36 @@ export function chatRouter(): Router {
       res.json(config);
     } catch (error) {
       const msg = error instanceof Error ? error.message : "切换 Provider 失败";
+      res.status(400).json({ error: msg });
+    }
+  });
+
+  router.get("/sandbox-config", (_req: Request, res: Response) => {
+    try {
+      res.json({
+        ...readSandboxConfig(),
+        modes: sandboxModeOptions,
+      });
+    } catch (error) {
+      res.status(500).json({ error: "读取权限配置失败" });
+    }
+  });
+
+  router.put("/sandbox-config", (req: Request, res: Response) => {
+    const { defaultSandbox } = req.body as { defaultSandbox?: string };
+    if (!defaultSandbox) {
+      res.status(400).json({ error: "缺少 defaultSandbox" });
+      return;
+    }
+    try {
+      const config = setDefaultSandbox(defaultSandbox);
+      logger.info("sandbox.switched", { sandbox: config.defaultSandbox });
+      res.json({
+        ...config,
+        modes: sandboxModeOptions,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "保存权限配置失败";
       res.status(400).json({ error: msg });
     }
   });
