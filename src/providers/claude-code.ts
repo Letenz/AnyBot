@@ -6,6 +6,7 @@ import {
   type SDKControlGetContextUsageResponse,
   type SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import { ProviderCancelledError } from "./types.js";
 import type {
   IProvider,
   RunOptions,
@@ -219,6 +220,7 @@ export class ClaudeCodeProvider implements IProvider {
       sessionId,
       newSessionId,
       timeoutMs = DEFAULT_TIMEOUT_MS,
+      signal,
     } = opts;
     const prompt = `${WORKDIR_SAFETY_PROMPT}\n\n${opts.prompt}`;
     const sandbox = opts.sandbox ?? "read-only";
@@ -232,6 +234,12 @@ export class ClaudeCodeProvider implements IProvider {
       timedOut = true;
       abortController.abort();
     }, timeoutMs);
+    const abortFromSignal = () => abortController.abort(signal?.reason);
+    if (signal?.aborted) {
+      abortFromSignal();
+    } else {
+      signal?.addEventListener("abort", abortFromSignal, { once: true });
+    }
 
     logger.info("provider.exec.start", {
       provider: this.type,
@@ -441,6 +449,7 @@ export class ClaudeCodeProvider implements IProvider {
       };
     } catch (err) {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromSignal);
 
       if (timedOut) {
         logger.warn("provider.exec.timeout", {
@@ -450,6 +459,22 @@ export class ClaudeCodeProvider implements IProvider {
           durationMs: Date.now() - startedAt,
         });
         throw new ProviderTimeoutError(timeoutMs);
+      }
+
+      if (signal?.aborted) {
+        logger.info("provider.exec.cancelled", {
+          provider: this.type,
+          workdir,
+          sandbox,
+          durationMs: Date.now() - startedAt,
+        });
+        await onEvent?.({
+          type: "agent_status",
+          status: "failed",
+          message: "Claude Code Agent 已中断",
+          durationMs: Date.now() - startedAt,
+        });
+        throw new ProviderCancelledError();
       }
 
       logger.error("provider.exec.error", {
@@ -466,6 +491,9 @@ export class ClaudeCodeProvider implements IProvider {
         durationMs: Date.now() - startedAt,
       });
       throw err;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromSignal);
     }
   }
 }

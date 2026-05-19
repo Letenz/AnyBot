@@ -262,6 +262,11 @@ async function startBackend() {
 }
 
 function createMenu() {
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
   const template = [
     {
       label: app.name,
@@ -312,6 +317,7 @@ function createWindow() {
     minHeight: 640,
     title: "AnyBot",
     show: false,
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

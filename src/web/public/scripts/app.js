@@ -103,6 +103,7 @@
         let currentSessionProvider = null;
         let activeProjectId = null;
         let isTyping = false;
+        let isCancellingResponse = false;
         let sessions = [];
         let projects = [];
         let modelConfig = null;
@@ -141,6 +142,8 @@
         let pendingAttachments = []; // { path, name, size, isImage, localUrl? }
 
         const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff', '.tif', '.heic', '.heif', '.avif'];
+        const SEND_BUTTON_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2 7h10M7.5 2.5L12 7l-4.5 4.5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        const STOP_BUTTON_ICON = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.4" fill="white"/></svg>';
 
         function readStoredTheme() {
             var value = localStorage.getItem(THEME_STORAGE_KEY);
@@ -226,7 +229,14 @@
         }
 
         function updateSendBtnState() {
-            sendBtn.disabled = (inputEl.value.trim() === '' && pendingAttachments.length === 0) || isTyping;
+            var isRunning = !!isTyping;
+            sendBtn.classList.toggle('is-stop', isRunning);
+            sendBtn.innerHTML = isRunning ? STOP_BUTTON_ICON : SEND_BUTTON_ICON;
+            sendBtn.title = isRunning ? (isCancellingResponse ? '正在中断' : '中断') : '发送';
+            sendBtn.setAttribute('aria-label', sendBtn.title);
+            sendBtn.disabled = isRunning
+                ? isCancellingResponse
+                : (inputEl.value.trim() === '' && pendingAttachments.length === 0);
         }
 
         function resizeChatInput() {
@@ -325,11 +335,17 @@
         inputEl.addEventListener('keydown', function (e) {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                if (!sendBtn.disabled) sendMessage();
+                if (!isTyping && !sendBtn.disabled) sendMessage();
             }
         });
 
-        sendBtn.addEventListener('click', sendMessage);
+        sendBtn.addEventListener('click', function () {
+            if (isTyping) {
+                cancelCurrentResponse();
+                return;
+            }
+            sendMessage();
+        });
         newChatBtn.addEventListener('click', function () {
             createNewChat();
         });
@@ -1205,7 +1221,31 @@
             }
             activeStreamSessionId = null;
             isTyping = false;
+            isCancellingResponse = false;
             updateSendBtnState();
+        }
+
+        async function cancelCurrentResponse() {
+            var targetSessionId = activeStreamSessionId || currentSessionId;
+            if (!targetSessionId || isCancellingResponse) return;
+
+            isCancellingResponse = true;
+            updateSendBtnState();
+            try {
+                var res = await fetch('/api/sessions/' + targetSessionId + '/messages/cancel', {
+                    method: 'POST',
+                });
+                if (!res.ok) {
+                    var err = await res.json().catch(function () {
+                        return {};
+                    });
+                    throw new Error(err.error || '中断失败');
+                }
+            } catch (e) {
+                isCancellingResponse = false;
+                updateSendBtnState();
+                showError(e.message || '中断失败');
+            }
         }
 
         async function resumeActiveStream(sessionId, activeStream) {
@@ -1215,6 +1255,7 @@
             activeStreamAbortController = controller;
             activeStreamSessionId = sessionId;
             isTyping = true;
+            isCancellingResponse = false;
             updateSendBtnState();
 
             var agentView = window.ClaudeAgentLoop.createMessage({
@@ -1237,6 +1278,7 @@
                     if (agentView.row) agentView.row.remove();
                     stopActiveStreamSubscription();
                     isTyping = false;
+                    isCancellingResponse = false;
                     updateSendBtnState();
                     await loadSession(sessionId);
                     return;
@@ -1257,6 +1299,7 @@
                     activeStreamAbortController = null;
                     activeStreamSessionId = null;
                     isTyping = false;
+                    isCancellingResponse = false;
                     updateSendBtnState();
                 }
             }
@@ -1343,6 +1386,7 @@
             // 收集已上传完成的附件
             var readyAttachments = pendingAttachments.filter(function (a) { return !a.uploading && a.path; });
             if ((!text && readyAttachments.length === 0) || isTyping || !currentSessionId) return;
+            var requestSessionId = currentSessionId;
 
             // 收集附件信息用于显示（包含 path 以便渲染图片）
             var attachmentInfos = readyAttachments.map(function (a) { return { name: a.name, path: a.path }; });
@@ -1351,6 +1395,8 @@
             resizeChatInput();
             sendBtn.disabled = true;
             isTyping = true;
+            isCancellingResponse = false;
+            updateSendBtnState();
 
             // 清空附件预览
             pendingAttachments = [];
@@ -1375,18 +1421,27 @@
                         messagesEl: messagesEl,
                         scrollBottom: scrollBottom,
                     });
+                    var streamController = new AbortController();
+                    activeStreamAbortController = streamController;
+                    activeStreamSessionId = requestSessionId;
                     var streamResult = await window.ClaudeAgentLoop.stream({
-                        sessionId: currentSessionId,
+                        sessionId: requestSessionId,
                         body: body,
                         view: agentView,
+                        signal: streamController.signal,
                         onContextUsage: updateContextUsage,
                     });
+                    if (activeStreamSessionId === requestSessionId) {
+                        activeStreamAbortController = null;
+                        activeStreamSessionId = null;
+                    }
                     if (!streamResult.fallback) {
                         if (streamResult.result && streamResult.result.provider) {
                             currentSessionProvider = streamResult.result.provider;
                         }
                         await fetchSessions();
                         isTyping = false;
+                        isCancellingResponse = false;
                         updateSendBtnState();
                         return;
                     }
@@ -1395,7 +1450,7 @@
                     showTyping();
                 }
 
-                var res = await fetch('/api/sessions/' + currentSessionId + '/messages', {
+                var res = await fetch('/api/sessions/' + requestSessionId + '/messages', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(body),
@@ -1409,6 +1464,7 @@
                     });
                     showError(err.error || '发送失败，请重试');
                     isTyping = false;
+                    isCancellingResponse = false;
                     return;
                 }
 
@@ -1420,16 +1476,25 @@
                 await fetchSessions();
             } catch (e) {
                 removeTyping();
-                if (agentView) {
+                if (activeStreamSessionId === requestSessionId) {
+                    activeStreamAbortController = null;
+                    activeStreamSessionId = null;
+                }
+                if (e.name === 'AbortError') {
+                    // 切换会话时只断开本页订阅，不取消后台任务。
+                } else if (agentView) {
                     agentView.handleEvent({
                         type: 'error',
                         error: e.message || '网络错误，请检查连接',
                     });
+                    showError(e.message || '网络错误，请检查连接');
+                } else {
+                    showError(e.message || '网络错误，请检查连接');
                 }
-                showError(e.message || '网络错误，请检查连接');
             }
 
             isTyping = false;
+            isCancellingResponse = false;
             updateSendBtnState();
         }
 

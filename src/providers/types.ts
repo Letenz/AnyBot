@@ -17,6 +17,7 @@ export interface RunOptions {
   newSessionId?: string;
   sandbox?: SandboxMode;
   timeoutMs?: number;
+  signal?: AbortSignal;
 }
 
 export interface RunResult {
@@ -62,4 +63,11 @@ export interface IProvider {
       onEvent: (event: ClaudeAgentStreamEvent) => void | Promise<void>;
     },
   ): Promise<RunResult>;
+}
+
+export class ProviderCancelledError extends Error {
+  constructor() {
+    super("已中断");
+    this.name = "ProviderCancelledError";
+  }
 }

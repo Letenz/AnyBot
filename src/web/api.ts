@@ -53,6 +53,7 @@ import {
 } from "../shared.js";
 import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
 import type { IProvider } from "../providers/index.js";
+import { ProviderCancelledError } from "../providers/types.js";
 import {
   attachAgentStreamClient,
   buildAssistantMetadata,
@@ -69,6 +70,7 @@ const execFile = promisify(execFileCallback);
 const DEFAULT_SESSION_MESSAGE_LIMIT = 40;
 const MESSAGE_PREVIEW_CHARS = 20000;
 const WORKSPACE_MEMORY_FILES = ["AGENTS.md", "MEMORY.md", "PROFILE.md", "BOOTSTRAP.md"] as const;
+const activeRunControllers = new Map<string, AbortController>();
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
@@ -1037,6 +1039,25 @@ export function chatRouter(): Router {
     }
   });
 
+  router.post("/sessions/:id/messages/cancel", (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const session = db.getSessionMetadata(id);
+    if (!session) {
+      res.status(404).json({ error: "会话不存在" });
+      return;
+    }
+
+    const controller = activeRunControllers.get(id);
+    if (!controller) {
+      res.status(409).json({ error: "当前会话没有正在处理的 Claude/Codex 请求" });
+      return;
+    }
+
+    controller.abort();
+    logger.info("web.chat.cancel.requested", { sessionId: id, provider: session.provider });
+    res.json({ ok: true });
+  });
+
   router.post("/sessions/:id/messages/stream", async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const session = db.getSessionMetadata(id);
@@ -1120,18 +1141,26 @@ export function chatRouter(): Router {
           includeWorkspaceMemory: !session.projectId,
         });
 
+    const runAbortController = new AbortController();
+    activeRunControllers.set(id, runAbortController);
     const active = createActiveAgentStream(id);
     attachAgentStreamClient(id, res);
 
     const agentEvents: ClaudeAgentStreamEvent[] = [];
     const emit = (event: AgentStreamEvent) => {
-      if (event.type !== "result" && event.type !== "error" && event.type !== "done") {
+      if (
+        event.type !== "result" &&
+        event.type !== "error" &&
+        event.type !== "cancelled" &&
+        event.type !== "done"
+      ) {
         agentEvents.push(event);
       }
       emitAgentStream(active, event);
     };
 
     void (async () => {
+      const changeSnapshot = await safeCreateChangeSnapshotForWorkdir(sessionWorkdir);
       try {
         logger.info("web.chat.stream.start", {
           sessionId: session.id,
@@ -1143,7 +1172,6 @@ export function chatRouter(): Router {
           fileCount: filePaths.length,
         });
 
-        const changeSnapshot = await safeCreateChangeSnapshotForWorkdir(sessionWorkdir);
         const result = await provider.runWithEvents({
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
@@ -1152,6 +1180,7 @@ export function chatRouter(): Router {
           imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
           sessionId: session.sessionId || undefined,
           newSessionId: session.sessionId ? undefined : randomUUID(),
+          signal: runAbortController.signal,
           onEvent: emit,
         });
 
@@ -1199,6 +1228,36 @@ export function chatRouter(): Router {
           replyChars: result.text.length,
         });
       } catch (error) {
+        if (error instanceof ProviderCancelledError) {
+          const changeReview = await safeCollectChangeReview(changeSnapshot);
+          db.addMessage(
+            id,
+            "assistant",
+            "已中断",
+            buildAssistantMetadata({
+              provider: provider.type,
+              events: agentEvents,
+              changeReview,
+            }),
+          );
+          db.updateSession({
+            id,
+            title: session.title,
+            sessionId: session.sessionId,
+            provider: session.provider,
+            updatedAt: Date.now(),
+          });
+          logger.info("web.chat.stream.cancelled", {
+            sessionId: session.id,
+            provider: provider.type,
+          });
+          emit({
+            type: "cancelled",
+            message: "已中断",
+          });
+          return;
+        }
+
         logger.error("web.chat.stream.failed", {
           sessionId: session.id,
           error,
@@ -1208,6 +1267,7 @@ export function chatRouter(): Router {
           error: error instanceof Error ? error.message : "处理消息时出错了，请稍后再试。",
         });
       } finally {
+        activeRunControllers.delete(id);
         finishAgentStream(id, active);
       }
     })();

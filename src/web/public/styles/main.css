@@ -2402,6 +2402,16 @@
             box-shadow: 0 0 24px rgba(124, 111, 247, 0.4);
         }
 
+        #send-btn.is-stop {
+            background: #ef4444;
+            box-shadow: 0 0 18px rgba(239, 68, 68, 0.28);
+        }
+
+        #send-btn.is-stop:hover {
+            background: #dc2626;
+            box-shadow: 0 0 24px rgba(239, 68, 68, 0.38);
+        }
+
         #send-btn:active {
             transform: scale(0.97);
         }
@@ -2411,6 +2421,11 @@
             cursor: default;
             transform: none;
             box-shadow: none;
+        }
+
+        #send-btn.is-stop:disabled {
+            background: #b91c1c;
+            opacity: 0.72;
         }
 
         .input-hint {

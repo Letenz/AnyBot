@@ -260,7 +260,12 @@ async function generateReply(
     const changeSnapshot = active ? await safeCreateChangeSnapshotForWorkdir(workdir) : null;
     const emit = active
       ? (event: AgentStreamEvent) => {
-          if (event.type !== "result" && event.type !== "error" && event.type !== "done") {
+          if (
+            event.type !== "result" &&
+            event.type !== "error" &&
+            event.type !== "cancelled" &&
+            event.type !== "done"
+          ) {
             agentEvents.push(event);
           }
           emitAgentStream(active, event);

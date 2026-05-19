@@ -19,6 +19,7 @@ export type AgentStreamEvent =
       contextUsage?: ProviderContextUsage;
     }
   | { type: "error"; error: string }
+  | { type: "cancelled"; message?: string }
   | { type: "done" };
 
 type ActiveAgentStream = {

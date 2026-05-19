@@ -457,6 +457,16 @@
                 return;
             }
 
+            if (event.type === 'cancelled') {
+                state.answerText = event.message || '已中断';
+                renderAnswer();
+                state.status = 'completed';
+                updateProcessTitle();
+                if (ticker) clearInterval(ticker);
+                process.open = false;
+                return;
+            }
+
             if (event.type === 'file_change') {
                 state.editCount += event.event === 'unlink' ? 0 : 1;
                 if (event.path) state.readFiles.add(event.path);

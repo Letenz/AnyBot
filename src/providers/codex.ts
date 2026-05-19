@@ -9,6 +9,7 @@ import {
 import fs from "fs/promises";
 import os from "os";
 import path from "path";
+import { ProviderCancelledError } from "./types.js";
 import type {
   IProvider,
   ProviderCapabilities,
@@ -391,6 +392,7 @@ export class CodexProvider implements IProvider {
       imagePaths = [],
       sessionId,
       timeoutMs = DEFAULT_TIMEOUT_MS,
+      signal,
     } = opts;
     const sandbox = opts.sandbox ?? process.env.CODEX_SANDBOX ?? "read-only";
     const startedAt = Date.now();
@@ -408,6 +410,12 @@ export class CodexProvider implements IProvider {
       timedOut = true;
       abortController.abort();
     }, timeoutMs);
+    const abortFromSignal = () => abortController.abort(signal?.reason);
+    if (signal?.aborted) {
+      abortFromSignal();
+    } else {
+      signal?.addEventListener("abort", abortFromSignal, { once: true });
+    }
 
     logger.info("provider.exec.start", {
       provider: this.type,
@@ -522,6 +530,7 @@ export class CodexProvider implements IProvider {
       };
     } catch (error) {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromSignal);
 
       if (timedOut) {
         logger.warn("provider.exec.timeout", {
@@ -539,6 +548,23 @@ export class CodexProvider implements IProvider {
         throw new ProviderTimeoutError(timeoutMs);
       }
 
+      if (signal?.aborted) {
+        logger.info("provider.exec.cancelled", {
+          provider: this.type,
+          workdir,
+          sandbox,
+          durationMs: Date.now() - startedAt,
+          sessionId: providerSessionId,
+        });
+        await onEvent?.({
+          type: "agent_status",
+          status: "failed",
+          message: "Codex Agent 已中断",
+          durationMs: Date.now() - startedAt,
+        });
+        throw new ProviderCancelledError();
+      }
+
       logger.error("provider.exec.error", {
         provider: this.type,
         workdir,
@@ -553,6 +579,9 @@ export class CodexProvider implements IProvider {
         durationMs: Date.now() - startedAt,
       });
       throw error;
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromSignal);
     }
   }
 
