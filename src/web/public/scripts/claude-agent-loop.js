@@ -127,6 +127,12 @@
         bubble.appendChild(content);
         row.appendChild(bubble);
         messagesEl.appendChild(row);
+        if (window.AnyBotMessageMeta && typeof window.AnyBotMessageMeta.attach === 'function') {
+            window.AnyBotMessageMeta.attach(row, {
+                createdAt: opts.createdAt || startedAt,
+                copyText: function () { return state.answerText || finalEl.textContent || ''; },
+            });
+        }
         scrollBottom();
 
         var ticker = isPersisted ? null : setInterval(function () {
@@ -506,6 +512,7 @@
             scrollBottom: opts.scrollBottom,
             persisted: true,
             open: false,
+            createdAt: opts.createdAt,
         });
         var loop = opts.loop || {};
         var events = Array.isArray(loop.events) ? loop.events : [];

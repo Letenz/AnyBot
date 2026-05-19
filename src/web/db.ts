@@ -10,7 +10,7 @@ export type ChatSession = {
   source: string;
   chatId: string | null;
   projectId: string | null;
-  messages: Array<{ id: number; role: "user" | "assistant"; content: string; metadata?: string | null }>;
+  messages: Array<{ id: number; role: "user" | "assistant"; content: string; createdAt: number; metadata?: string | null }>;
   createdAt: number;
   updatedAt: number;
 };
@@ -140,13 +140,13 @@ const stmts = {
   `),
 
   getMessages: db.prepare(`
-    SELECT id, role, content, metadata FROM messages
+    SELECT id, role, content, created_at AS createdAt, metadata FROM messages
     WHERE session_id = ? ORDER BY id ASC
   `),
 
   getMessagesPage: db.prepare(`
-    SELECT id, role, content, metadata FROM (
-      SELECT id, role, content, metadata FROM messages
+    SELECT id, role, content, createdAt, metadata FROM (
+      SELECT id, role, content, created_at AS createdAt, metadata FROM messages
       WHERE session_id = ?
         AND (? IS NULL OR id < ?)
       ORDER BY id DESC
@@ -251,6 +251,7 @@ export function getSession(id: string): ChatSession | null {
     id: number;
     role: "user" | "assistant";
     content: string;
+    createdAt: number;
     metadata: string | null;
   }>;
 
@@ -335,6 +336,7 @@ export function findSessionBySourceChat(
     id: number;
     role: "user" | "assistant";
     content: string;
+    createdAt: number;
     metadata: string | null;
   }>;
   return { ...row, messages };
