@@ -436,6 +436,21 @@
             return value;
         }
 
+        function isLocalFileLinkHref(href) {
+            var value = String(href || '').trim();
+            if (!value) return false;
+
+            try {
+                value = decodeURI(value);
+            } catch (_) {
+            }
+
+            if (/^file:/i.test(value)) return true;
+            if (/^[a-zA-Z]:[\\/]/.test(value)) return true;
+            if (/^\\\\[^\\]+\\[^\\]+/.test(value)) return true;
+            return /^\/(?:Users|home|private|tmp|var|Volumes|Applications|opt|usr|etc)(?:\/|$)/.test(value);
+        }
+
         function isExternalLinkHref(href) {
             try {
                 var url = new URL(href, window.location.href);
@@ -481,6 +496,7 @@
                 var title = (typeof obj === 'string') ? '' : (obj.title || '');
                 var text = (typeof obj === 'string') ? escapeHtml(href) : (obj.text || escapeHtml(href));
                 if (!href || /^\s*javascript:/i.test(href)) return text;
+                if (isLocalFileLinkHref(href)) return text;
                 var externalAttrs = isExternalLinkHref(href) ? ' target="_blank" rel="noopener noreferrer"' : '';
                 return '<a href="' + escapeAttr(href) + '"'
                     + (title ? ' title="' + escapeAttr(title) + '"' : '')
