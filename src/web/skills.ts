@@ -22,13 +22,28 @@ interface SkillSource {
 const SKILL_FILE = "SKILL.md";
 const DISABLED_SKILL_FILE = "SKILL.md.disabled";
 
+function expandHomeDir(dir: string): string {
+  if (dir === "~") return os.homedir();
+  if (dir.startsWith("~/") || dir.startsWith("~\\")) return path.join(os.homedir(), dir.slice(2));
+  return dir;
+}
+
+function getClaudeConfigDir(): string {
+  const configDir = process.env.CLAUDE_CONFIG_DIR?.trim();
+  return path.resolve(expandHomeDir(configDir || path.join(os.homedir(), ".claude"))).normalize("NFC");
+}
+
+function getCodexHome(): string {
+  const codexHome = process.env.CODEX_HOME?.trim();
+  return path.resolve(expandHomeDir(codexHome || path.join(os.homedir(), ".codex"))).normalize("NFC");
+}
+
 const PROVIDER_SKILL_DIRS: Record<string, () => SkillSource[]> = {
   codex: () => {
-    const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-    return [{ label: "Codex 技能", dir: path.join(codexHome, "skills") }];
+    return [{ label: "Codex 技能", dir: path.join(getCodexHome(), "skills") }];
   },
   "claude-code": () => {
-    return [{ label: "Claude Code 技能", dir: path.join(os.homedir(), ".claude", "skills") }];
+    return [{ label: "Claude Code 技能", dir: path.join(getClaudeConfigDir(), "skills") }];
   },
   "gemini-cli": () => {
     return [{ label: "Gemini CLI 技能", dir: path.join(os.homedir(), ".agents", "skills") }];
@@ -253,8 +268,7 @@ export function openSkillsFolder(skillPath?: string): void {
     return;
   }
 
-  const codexHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-  const defaultDir = path.join(codexHome, "skills");
+  const defaultDir = path.join(getCodexHome(), "skills");
   const baseDir = getSkillSources()[0]?.dir || defaultDir;
   const dirs = new Set<string>();
 

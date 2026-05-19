@@ -353,9 +353,9 @@ After switching Providers, the skill list automatically switches to the correspo
 
 | Provider | Skill Directory |
 |----------|----------------|
-| `codex` | `~/.codex/skills/` |
+| `codex` | `$CODEX_HOME/skills/`, or `~/.codex/skills/` when unset |
 | `gemini-cli` | `~/.gemini/` |
-| `claude-code` | `~/.claude/skills/` |
+| `claude-code` | `$CLAUDE_CONFIG_DIR/skills/`, or `~/.claude/skills/` when unset |
 | `cursor-cli` | `./.cursor/rules/` |
 | `qoder-cli` | `~/.qoder/agents/` |
 

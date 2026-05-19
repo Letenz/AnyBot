@@ -353,9 +353,9 @@ AnyBot 使用可插拔的 Provider 架构，每个 AI CLI 工具对应一个 Pro
 
 | Provider | 技能目录 |
 |----------|---------|
-| `codex` | `~/.codex/skills/` |
+| `codex` | `$CODEX_HOME/skills/`，未设置时为 `~/.codex/skills/` |
 | `gemini-cli` | `~/.gemini/` |
-| `claude-code` | `~/.claude/skills/` |
+| `claude-code` | `$CLAUDE_CONFIG_DIR/skills/`，未设置时为 `~/.claude/skills/` |
 | `cursor-cli` | `./.cursor/rules/` |
 | `qoder-cli` | `~/.qoder/agents/` |
 
