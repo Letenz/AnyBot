@@ -122,6 +122,24 @@ function applyDesktopSettings() {
   return settings;
 }
 
+function shouldOpenOutsideApp(url, appOrigin) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "mailto:" || parsed.protocol === "tel:") {
+      return true;
+    }
+    return (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.origin !== appOrigin;
+  } catch {
+    return false;
+  }
+}
+
+function openOutsideApp(url) {
+  shell.openExternal(url).catch((error) => {
+    writeLog("main:openExternal", `${url}: ${error.stack || error.message || error}`);
+  });
+}
+
 function buildPathEnv(existingPath) {
   const entries = [];
 
@@ -310,6 +328,8 @@ function createMenu() {
 
 function createWindow() {
   const port = resolveWebPort();
+  const appUrl = `http://127.0.0.1:${port}`;
+  const appOrigin = new URL(appUrl).origin;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 840,
@@ -324,12 +344,22 @@ function createWindow() {
     },
   });
 
-  mainWindow.loadURL(`http://127.0.0.1:${port}`);
+  mainWindow.loadURL(appUrl);
   mainWindow.once("ready-to-show", () => mainWindow.show());
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (shouldOpenOutsideApp(url, appOrigin)) {
+      openOutsideApp(url);
+    }
     return { action: "deny" };
+  });
+
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!shouldOpenOutsideApp(url, appOrigin)) {
+      return;
+    }
+    event.preventDefault();
+    openOutsideApp(url);
   });
 
   mainWindow.on("closed", () => {

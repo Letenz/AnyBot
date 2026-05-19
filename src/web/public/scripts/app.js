@@ -422,6 +422,30 @@
             return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
+        function escapeAttr(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+        }
+
+        function normalizeLinkHref(href) {
+            var value = String(href || '').trim();
+            if (/^www\./i.test(value)) return 'https://' + value;
+            return value;
+        }
+
+        function isExternalLinkHref(href) {
+            try {
+                var url = new URL(href, window.location.href);
+                if (url.protocol === 'mailto:' || url.protocol === 'tel:') return true;
+                return (url.protocol === 'http:' || url.protocol === 'https:') && url.origin !== window.location.origin;
+            } catch (_) {
+                return false;
+            }
+        }
+
         if (typeof marked !== 'undefined') {
             var markedRenderer = new marked.Renderer();
             markedRenderer.code = function (obj) {
@@ -450,6 +474,17 @@
                 return '<img src="' + href + '" alt="' + escapeHtml(alt) + '"'
                     + (title ? ' title="' + escapeHtml(title) + '"' : '')
                     + ' class="chat-image" onclick="openImageModal(this.src)" />';
+            };
+
+            markedRenderer.link = function (obj) {
+                var href = normalizeLinkHref((typeof obj === 'string') ? obj : (obj.href || ''));
+                var title = (typeof obj === 'string') ? '' : (obj.title || '');
+                var text = (typeof obj === 'string') ? escapeHtml(href) : (obj.text || escapeHtml(href));
+                if (!href || /^\s*javascript:/i.test(href)) return text;
+                var externalAttrs = isExternalLinkHref(href) ? ' target="_blank" rel="noopener noreferrer"' : '';
+                return '<a href="' + escapeAttr(href) + '"'
+                    + (title ? ' title="' + escapeAttr(title) + '"' : '')
+                    + externalAttrs + '>' + text + '</a>';
             };
 
             marked.setOptions({
