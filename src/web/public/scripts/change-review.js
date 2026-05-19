@@ -81,10 +81,9 @@
         return rendered.join('\n') || renderDiffLine('meta', '', '没有可展示的文本变化');
     }
 
-    function renderFile(file, index) {
-        var open = index === 0 ? ' open' : '';
+    function renderFile(file) {
         return '' +
-            '<details class="change-review-file"' + open + '>' +
+            '<details class="change-review-file">' +
             '<summary>' +
             '<span class="change-review-file-main">' +
             '<span class="change-review-file-path">' + escapeHtml(file.path) + '</span>' +
