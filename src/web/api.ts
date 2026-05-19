@@ -68,6 +68,7 @@ import {
 const execFile = promisify(execFileCallback);
 const DEFAULT_SESSION_MESSAGE_LIMIT = 40;
 const MESSAGE_PREVIEW_CHARS = 20000;
+const WORKSPACE_MEMORY_FILES = ["AGENTS.md", "MEMORY.md", "PROFILE.md", "BOOTSTRAP.md"] as const;
 
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
@@ -204,6 +205,26 @@ function normalizeProjectPath(inputPath: string): string {
     throw new Error("项目路径必须是文件夹");
   }
   return resolved;
+}
+
+function migrateWorkspaceMemoryFiles(sourceDir: string, targetDir: string): string[] {
+  const from = path.resolve(sourceDir);
+  const to = path.resolve(targetDir);
+  if (from === to) return [];
+
+  const copied: string[] = [];
+  for (const file of WORKSPACE_MEMORY_FILES) {
+    const source = path.join(from, file);
+    const target = path.join(to, file);
+    try {
+      if (!fs.existsSync(source) || fs.existsSync(target)) continue;
+      fs.copyFileSync(source, target);
+      copied.push(file);
+    } catch (error) {
+      logger.warn("workspace.memory_migration_file_failed", { file, source, target, error });
+    }
+  }
+  return copied;
 }
 
 function createOrTouchProject(projectPath: string): db.Project {
@@ -504,10 +525,22 @@ export function chatRouter(): Router {
   router.put("/app-settings", (req: Request, res: Response) => {
     try {
       const settings = req.body as Partial<AppSettings>;
+      const previousWorkdir = getWorkdir();
+      let requestedWorkdir: string | undefined;
       if (settings.workspace?.defaultWorkdir) {
         settings.workspace.defaultWorkdir = normalizeProjectPath(settings.workspace.defaultWorkdir);
+        requestedWorkdir = settings.workspace.defaultWorkdir;
       }
       const next = updateAppSettings(settings);
+      const migratedMemoryFiles = requestedWorkdir
+        ? [
+            ...migrateWorkspaceMemoryFiles(previousWorkdir, next.workspace.defaultWorkdir),
+            ...migrateWorkspaceMemoryFiles(process.cwd(), next.workspace.defaultWorkdir),
+          ]
+        : [];
+      if (migratedMemoryFiles.length > 0) {
+        logger.info("workspace.memory_migrated", { from: previousWorkdir, to: next.workspace.defaultWorkdir, files: migratedMemoryFiles });
+      }
       logger.info("app_settings.updated");
       res.json({
         settings: next,
@@ -517,6 +550,7 @@ export function chatRouter(): Router {
           workdir: getWorkdir(),
           uploadDir: getUploadDir(),
         },
+        migratedMemoryFiles,
       });
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "保存设置失败" });

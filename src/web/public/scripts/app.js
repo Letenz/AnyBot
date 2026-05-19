@@ -1585,7 +1585,10 @@
                 }
                 appSettingsPayload = await res.json();
                 appSettings = mergeAppSettings(appSettingsPayload.settings);
-                showSettingsStatus(successMessage || '已保存');
+                var migratedCount = Array.isArray(appSettingsPayload.migratedMemoryFiles)
+                    ? appSettingsPayload.migratedMemoryFiles.length
+                    : 0;
+                showSettingsStatus(migratedCount > 0 ? '已保存，已复制 ' + migratedCount + ' 个记忆文件' : (successMessage || '已保存'));
                 return true;
             } catch (e) {
                 showError('保存设置失败');
