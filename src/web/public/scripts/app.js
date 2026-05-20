@@ -137,6 +137,14 @@
         let currentNewestMessageId = 0;
         let isCurrentSessionSyncInFlight = false;
         let isLoadingOlderMessages = false;
+        let inputHistoryItems = [];
+        let inputHistoryCursor = null;
+        let inputHistoryDraft = '';
+        let inputHistoryOldestFetchedMessageId = null;
+        let inputHistoryHasMore = false;
+        let inputHistoryFetchPromise = null;
+        let inputHistoryNavigationPromise = null;
+        let inputHistoryNavigationVersion = 0;
         let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
         let expandedProjectIds = readStoredSet('expandedProjectIds');
@@ -381,6 +389,207 @@
             inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
         }
 
+        function getOldestMessageId(messages) {
+            return (messages || []).reduce(function (oldest, message) {
+                var id = Number(message && message.id || 0);
+                if (!id) return oldest;
+                return oldest === null || id < oldest ? id : oldest;
+            }, null);
+        }
+
+        function resetInputHistoryNavigation() {
+            inputHistoryCursor = null;
+            inputHistoryDraft = '';
+            inputHistoryNavigationPromise = null;
+            inputHistoryNavigationVersion += 1;
+        }
+
+        function createInputHistoryItem(message) {
+            if (!message || message.role !== 'user') return null;
+            var content = String(message.content || '').trim();
+            if (!content || content === '[附件]') return null;
+            return {
+                id: Number(message.id || 0) || null,
+                content: content,
+                contentTruncated: !!message.contentTruncated,
+            };
+        }
+
+        function mergeInputHistoryMessages(messages, placement) {
+            var seenIds = new Set(inputHistoryItems
+                .map(function (item) { return item.id; })
+                .filter(function (id) { return id !== null; }));
+            var nextItems = [];
+            (messages || []).forEach(function (message) {
+                var item = createInputHistoryItem(message);
+                if (!item) return;
+                if (item.id !== null && seenIds.has(item.id)) return;
+                if (item.id !== null) seenIds.add(item.id);
+                nextItems.push(item);
+            });
+            if (nextItems.length === 0) return 0;
+
+            if (placement === 'prepend') {
+                inputHistoryItems = nextItems.concat(inputHistoryItems);
+                if (inputHistoryCursor !== null) inputHistoryCursor += nextItems.length;
+            } else {
+                inputHistoryItems = inputHistoryItems.concat(nextItems);
+            }
+            return nextItems.length;
+        }
+
+        function resetInputHistoryFromMessages(messages, hasMoreMessages) {
+            inputHistoryItems = [];
+            inputHistoryOldestFetchedMessageId = getOldestMessageId(messages);
+            inputHistoryHasMore = !!hasMoreMessages;
+            resetInputHistoryNavigation();
+            mergeInputHistoryMessages(messages, 'append');
+        }
+
+        function prependInputHistoryMessages(messages, hasMoreMessages) {
+            var addedCount = mergeInputHistoryMessages(messages, 'prepend');
+            var oldestId = getOldestMessageId(messages);
+            if (oldestId !== null) inputHistoryOldestFetchedMessageId = oldestId;
+            inputHistoryHasMore = !!hasMoreMessages;
+            return addedCount;
+        }
+
+        function rememberSentUserMessage(text) {
+            var content = String(text || '').trim();
+            if (!content) return;
+            inputHistoryItems.push({
+                id: null,
+                content: content,
+                contentTruncated: false,
+            });
+            resetInputHistoryNavigation();
+        }
+
+        function setChatInputValue(value) {
+            inputEl.value = value;
+            resizeChatInput();
+            updateSendBtnState();
+            inputEl.focus();
+            if (inputEl.setSelectionRange) {
+                var end = inputEl.value.length;
+                inputEl.setSelectionRange(end, end);
+            }
+        }
+
+        function isInputCaretOnFirstLine() {
+            if (typeof inputEl.selectionStart !== 'number' || typeof inputEl.selectionEnd !== 'number') return true;
+            if (inputEl.selectionStart !== inputEl.selectionEnd) return false;
+            return inputEl.value.slice(0, inputEl.selectionStart).indexOf('\n') === -1;
+        }
+
+        function isInputCaretOnLastLine() {
+            if (typeof inputEl.selectionStart !== 'number' || typeof inputEl.selectionEnd !== 'number') return true;
+            if (inputEl.selectionStart !== inputEl.selectionEnd) return false;
+            return inputEl.value.slice(inputEl.selectionEnd).indexOf('\n') === -1;
+        }
+
+        function shouldHandleInputHistoryKey(e, direction) {
+            if (e.defaultPrevented || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return false;
+            if (direction < 0) return isInputCaretOnFirstLine();
+            return inputHistoryCursor !== null && isInputCaretOnLastLine();
+        }
+
+        async function fetchOlderInputHistoryPage() {
+            if (!currentSessionId || !inputHistoryHasMore) return 0;
+            if (inputHistoryFetchPromise) return inputHistoryFetchPromise;
+
+            inputHistoryFetchPromise = (async function () {
+                var addedTotal = 0;
+                while (currentSessionId && inputHistoryHasMore && addedTotal === 0) {
+                    var beforeId = inputHistoryOldestFetchedMessageId || getOldestRenderedMessageId();
+                    if (!beforeId) break;
+                    var requestSessionId = currentSessionId;
+                    var res = await fetch('/api/sessions/' + requestSessionId + '/messages?before=' + encodeURIComponent(beforeId) + '&limit=' + SESSION_MESSAGE_PAGE_SIZE);
+                    if (!res.ok) throw new Error('加载历史输入失败');
+                    var data = await res.json();
+                    if (currentSessionId !== requestSessionId) return addedTotal;
+                    if (!data.messages || data.messages.length === 0) {
+                        inputHistoryHasMore = false;
+                        break;
+                    }
+                    addedTotal += prependInputHistoryMessages(data.messages, data.hasMoreMessages);
+                }
+                return addedTotal;
+            })().finally(function () {
+                inputHistoryFetchPromise = null;
+            });
+
+            return inputHistoryFetchPromise;
+        }
+
+        async function getInputHistoryItemContent(item) {
+            if (!item || !item.contentTruncated || !item.id || !currentSessionId) {
+                return item ? item.content : '';
+            }
+            try {
+                var requestSessionId = currentSessionId;
+                var res = await fetch('/api/sessions/' + requestSessionId + '/messages/' + encodeURIComponent(item.id) + '/content');
+                if (!res.ok) return item.content;
+                var data = await res.json();
+                if (currentSessionId !== requestSessionId || typeof data.content !== 'string') return item.content;
+                item.content = data.content;
+                item.contentTruncated = false;
+            } catch (_) {}
+            return item.content;
+        }
+
+        async function applyInputHistoryIndex(index, navigationVersion) {
+            var item = inputHistoryItems[index];
+            if (!item) return false;
+            var content = await getInputHistoryItemContent(item);
+            if (navigationVersion !== inputHistoryNavigationVersion) return false;
+            inputHistoryCursor = index;
+            setChatInputValue(content);
+            return true;
+        }
+
+        async function navigateInputHistory(direction) {
+            if (inputHistoryNavigationPromise) return;
+            var navigationVersion = inputHistoryNavigationVersion;
+            inputHistoryNavigationPromise = (async function () {
+                if (!currentSessionId) return;
+
+                if (direction < 0) {
+                    if (inputHistoryCursor === null) inputHistoryDraft = inputEl.value;
+                    if (inputHistoryItems.length === 0) await fetchOlderInputHistoryPage();
+
+                    var targetIndex = -1;
+                    if (inputHistoryCursor === null) {
+                        targetIndex = inputHistoryItems.length - 1;
+                    } else if (inputHistoryCursor > 0) {
+                        targetIndex = inputHistoryCursor - 1;
+                    } else {
+                        var previousIndex = inputHistoryCursor;
+                        var addedCount = await fetchOlderInputHistoryPage();
+                        targetIndex = addedCount > 0 ? previousIndex + addedCount - 1 : 0;
+                    }
+
+                    if (targetIndex >= 0) await applyInputHistoryIndex(targetIndex, navigationVersion);
+                    return;
+                }
+
+                if (inputHistoryCursor === null) return;
+                if (inputHistoryCursor < inputHistoryItems.length - 1) {
+                    await applyInputHistoryIndex(inputHistoryCursor + 1, navigationVersion);
+                    return;
+                }
+
+                if (navigationVersion !== inputHistoryNavigationVersion) return;
+                inputHistoryCursor = null;
+                setChatInputValue(inputHistoryDraft);
+                inputHistoryDraft = '';
+            })().catch(function (e) {
+                console.warn('Failed to navigate input history:', e);
+            }).finally(function () {
+                inputHistoryNavigationPromise = null;
+            });
+        }
+
         function renderAttachmentPreview() {
             if (pendingAttachments.length === 0) {
                 attachmentPreview.style.display = 'none';
@@ -464,11 +673,20 @@
         }
 
         inputEl.addEventListener('input', function () {
+            resetInputHistoryNavigation();
             resizeChatInput();
             updateSendBtnState();
         });
 
         inputEl.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                var direction = e.key === 'ArrowUp' ? -1 : 1;
+                if (shouldHandleInputHistoryKey(e, direction)) {
+                    e.preventDefault();
+                    navigateInputHistory(direction);
+                    return;
+                }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 if (!isTyping && !sendBtn.disabled) sendMessage();
@@ -968,6 +1186,7 @@
                 removeOlderMessagesControl();
                 isBatchRenderingMessages = true;
                 try {
+                    prependInputHistoryMessages(data.messages || [], data.hasMoreMessages);
                     (data.messages || []).forEach(function (m) {
                         renderMessageRecord(m, anchor);
                     });
@@ -1638,6 +1857,7 @@
                 revealSessionContainer(currentSessionProjectId);
                 showChatView();
                 updateContextUsage(null);
+                resetInputHistoryFromMessages([], false);
                 showEmptyState();
                 inputEl.value = '';
                 resizeChatInput();
@@ -1770,6 +1990,7 @@
                 activeProjectId = data.projectId || null;
                 currentSessionHasMoreMessages = !!data.hasMoreMessages;
                 isLoadingOlderMessages = false;
+                resetInputHistoryFromMessages(data.messages || [], currentSessionHasMoreMessages);
                 updateContextUsage(null);
                 var didExpandProject = false;
                 if (activeProjectId && !expandedProjectIds.has(activeProjectId)) {
@@ -1819,6 +2040,7 @@
                     currentSessionProvider = null;
                     currentSessionUpdatedAt = 0;
                     currentNewestMessageId = 0;
+                    resetInputHistoryFromMessages([], false);
                     updateContextUsage(null);
                     showEmptyState();
                 }
@@ -1850,6 +2072,7 @@
             renderAttachmentPreview();
 
             appendMessage('user', text || '[附件]', attachmentInfos, null, { createdAt: Date.now() });
+            rememberSentUserMessage(text);
             showTyping();
 
             // 构建请求体
