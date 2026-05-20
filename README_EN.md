@@ -319,16 +319,18 @@ If the login session expires, clear `weixin.token` and restart the service to sc
 
 ## Chat Commands
 
-All channels (Feishu, QQ, Telegram, Weixin) support the following `/` commands:
+All channels (Feishu, QQ, Telegram, Weixin) support the following commands:
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
 | `/new` | Start a new session, reset current context |
-| `/provider` | View available providers and current selection |
-| `/provider <name>` | Switch provider, e.g. `/provider claude-code` |
-| `/model` | View available models for the current provider |
-| `/model <name>` | Switch model, e.g. `/model gpt-5.5` |
+| `provider` or `/provider` | View available providers and current selection, listed as `1`, `2`, etc. |
+| `provider <number>` | Switch provider, e.g. `provider 1` |
+| `model` or `/model` | View available models for the current provider, listed as `1`, `2`, etc. |
+| `model <number>` | Switch model, e.g. `model 1` |
+| `workspace` or `/workspace` | View workspaces; item 1 is the default workdir, followed by the project list |
+| `workspace <number>` | Switch workspace and start a new conversation, e.g. `workspace 1` |
 
 When switching providers, the last-used model for each provider is remembered and automatically restored when switching back.
 

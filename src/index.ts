@@ -36,11 +36,14 @@ import {
 } from "./web/agent-stream.js";
 import {
   canStreamPreparedChatTurn,
+  createChannelSession,
+  getSessionWorkdir,
   getOrCreateChannelSession,
   prepareChatTurn,
   resetChannelSession,
   runPreparedChatTurn,
 } from "./chat-runner.js";
+import * as db from "./web/db.js";
 
 function resolveInitialProviderType(): string {
   const persisted = readPersistedProviderType();
@@ -70,12 +73,14 @@ async function generateReply(
   source: string = "unknown",
 ): Promise<string> {
   const dbSession = getOrCreateChannelSession(source, chatId);
+  const workdir = getSessionWorkdir(dbSession);
   const prepared = prepareChatTurn({
     session: dbSession,
     userText,
     storedUserContent: userText,
     imagePaths,
-    workdir: getWorkdir(),
+    workdir,
+    includeWorkspaceMemory: !dbSession.projectId,
   });
   const active = canStreamPreparedChatTurn(prepared) && !hasActiveAgentStream(dbSession.id)
     ? createActiveAgentStream(dbSession.id)
@@ -141,6 +146,40 @@ function handleSwitchModel(modelId: string) {
   }
 }
 
+function listWorkspaces(chatId: string, source: string) {
+  const session = getOrCreateChannelSession(source, chatId);
+  return [
+    {
+      id: null,
+      name: "默认工作目录",
+      path: getWorkdir(),
+      isCurrent: !session.projectId,
+    },
+    ...db.listProjects().map((project) => ({
+      id: project.id,
+      name: project.name,
+      path: project.path,
+      isCurrent: session.projectId === project.id,
+    })),
+  ];
+}
+
+function handleSwitchWorkspace(
+  chatId: string,
+  source: string,
+  workspaceId: string | null,
+) {
+  const project = workspaceId ? db.getProject(workspaceId) : null;
+  if (workspaceId && !project) {
+    return { success: false, message: "工作区不存在" };
+  }
+
+  const name = project?.name || "默认工作目录";
+  resetChannelSession(chatId, source);
+  createChannelSession(source, chatId, workspaceId);
+  return { success: true, message: `工作区切换成功，当前工作区: ${name}，新对话已开启` };
+}
+
 const channelCallbacks: ChannelCallbacks = {
   generateReply: (chatId, userText, imagePaths, source) =>
     generateReply(chatId, userText, imagePaths, source),
@@ -149,6 +188,8 @@ const channelCallbacks: ChannelCallbacks = {
   switchProvider: handleSwitchProvider,
   listModels,
   switchModel: handleSwitchModel,
+  listWorkspaces,
+  switchWorkspace: handleSwitchWorkspace,
 };
 
 // --- Startup ---

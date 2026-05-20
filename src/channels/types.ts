@@ -55,6 +55,13 @@ export interface ModelInfo {
   isCurrent: boolean;
 }
 
+export interface WorkspaceInfo {
+  id: string | null;
+  name: string;
+  path: string;
+  isCurrent: boolean;
+}
+
 export interface ChannelCallbacks {
   generateReply: (
     chatId: string,
@@ -67,6 +74,12 @@ export interface ChannelCallbacks {
   switchProvider: (providerType: string) => { success: boolean; message: string };
   listModels: () => ModelInfo[];
   switchModel: (modelId: string) => { success: boolean; message: string };
+  listWorkspaces: (chatId: string, source: string) => WorkspaceInfo[];
+  switchWorkspace: (
+    chatId: string,
+    source: string,
+    workspaceId: string | null,
+  ) => { success: boolean; message: string };
 }
 
 export interface IChannel {

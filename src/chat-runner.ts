@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 import {
   createProvider,
@@ -184,10 +186,11 @@ function buildLogFields(prepared: PreparedChatTurn, opts: RunPreparedChatTurnOpt
   };
 }
 
-export function getOrCreateChannelSession(source: string, chatId: string): db.ChatSession {
-  const existing = db.findSessionBySourceChat(source, chatId);
-  if (existing) return existing;
-
+export function createChannelSession(
+  source: string,
+  chatId: string,
+  projectId: string | null = null,
+): db.ChatSession {
   const now = Date.now();
   const session: db.ChatSession = {
     id: generateId(),
@@ -196,13 +199,19 @@ export function getOrCreateChannelSession(source: string, chatId: string): db.Ch
     provider: getProvider().type,
     source,
     chatId,
-    projectId: null,
+    projectId,
     messages: [],
     createdAt: now,
     updatedAt: now,
   };
   db.createSession(session);
   return session;
+}
+
+export function getOrCreateChannelSession(source: string, chatId: string): db.ChatSession {
+  const existing = db.findSessionBySourceChat(source, chatId);
+  if (existing) return existing;
+  return createChannelSession(source, chatId);
 }
 
 export function resetChannelSession(chatId: string, source?: string): void {
@@ -213,6 +222,19 @@ export function resetChannelSession(chatId: string, source?: string): void {
   if (source) {
     db.detachChatId(source, chatId);
   }
+}
+
+export function getSessionWorkdir(session: Pick<db.ChatSession, "projectId">): string {
+  if (!session.projectId) return getWorkdir();
+  const project = db.getProject(session.projectId);
+  if (!project) {
+    throw new Error("项目不存在");
+  }
+  const resolved = fs.realpathSync(path.resolve(project.path));
+  if (!fs.statSync(resolved).isDirectory()) {
+    throw new Error("项目路径必须是文件夹");
+  }
+  return resolved;
 }
 
 export function prepareChatTurn(opts: PrepareChatTurnOptions): PreparedChatTurn {
