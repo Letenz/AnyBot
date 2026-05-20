@@ -310,9 +310,9 @@ If the login session expires, clear `weixin.token` and restart the service to sc
 
 ### Usage
 
-- **Direct Message** — Send text messages through the bound personal Weixin account
+- **Direct Message** — Send text, image, and file messages through the bound personal Weixin account
 - **Proactive Messaging** — `/api/send` supports `{ "channel": "weixin", "message": "..." }`
-- The Weixin channel currently supports text messages first; media support can be added on top of the same protocol
+- Images are downloaded and passed to the Provider for multimodal understanding; local image paths and `FILE:` replies are encrypted, uploaded to Weixin CDN, and sent back
 - All chat commands supported (see [Chat Commands](#chat-commands) below)
 
 ---

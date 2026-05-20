@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,12 +10,15 @@ import { handleCommand } from "./commands.js";
 import { readChannelConfig, updateChannelConfig } from "./config.js";
 import type { ChannelCallbacks, IChannel, WeixinChannelConfig } from "./types.js";
 import { logger } from "../logger.js";
+import { parseReplyPayload, isSupportedImagePath } from "../message.js";
+import { getWorkdir } from "../shared.js";
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 const FIXED_LOGIN_BASE_URL = "https://ilinkai.weixin.qq.com";
+const CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c";
 const DEFAULT_BOT_TYPE = "3";
 const DEFAULT_BOT_AGENT = "AnyBot/0.1.0";
 const CHANNEL_VERSION = "2.4.3";
@@ -21,14 +26,24 @@ const ILINK_APP_ID = "bot";
 const ILINK_APP_CLIENT_VERSION = buildClientVersion(CHANNEL_VERSION);
 const LONG_POLL_TIMEOUT_MS = 35_000;
 const API_TIMEOUT_MS = 15_000;
+const CDN_UPLOAD_TIMEOUT_MS = 60_000;
+const CDN_DOWNLOAD_TIMEOUT_MS = 60_000;
 const LOGIN_TIMEOUT_MS = 8 * 60_000;
 const SESSION_EXPIRED_ERRCODE = -14;
+const MAX_WEIXIN_MEDIA_SIZE_BYTES = 50 * 1024 * 1024;
 const dataDir = process.env.DATA_DIR || process.env.CODEX_DATA_DIR || path.resolve(__dirname, "../../.data");
 const SYNC_PATH = path.join(dataDir, "weixin-sync.json");
 
 const MessageItemType = {
   TEXT: 1,
+  IMAGE: 2,
   VOICE: 3,
+  FILE: 4,
+} as const;
+
+const UploadMediaType = {
+  IMAGE: 1,
+  FILE: 3,
 } as const;
 
 const MessageType = {
@@ -64,10 +79,32 @@ interface StatusResponse {
   redirect_host?: string;
 }
 
+interface CDNMedia {
+  encrypt_query_param?: string;
+  aes_key?: string;
+  encrypt_type?: number;
+}
+
+interface ImageItem {
+  media?: CDNMedia;
+  aeskey?: string;
+  url?: string;
+  mid_size?: number;
+}
+
+interface FileItem {
+  media?: CDNMedia;
+  file_name?: string;
+  md5?: string;
+  len?: string;
+}
+
 interface MessageItem {
   type?: number;
   text_item?: { text?: string };
   voice_item?: { text?: string };
+  image_item?: ImageItem;
+  file_item?: FileItem;
 }
 
 interface WeixinMessage {
@@ -91,6 +128,28 @@ interface GetUpdatesResp {
   msgs?: WeixinMessage[];
   get_updates_buf?: string;
   longpolling_timeout_ms?: number;
+}
+
+interface GetUploadUrlResp {
+  ret?: number;
+  errcode?: number;
+  errmsg?: string;
+  upload_param?: string;
+  upload_full_url?: string;
+}
+
+interface UploadedMedia {
+  downloadEncryptedQueryParam: string;
+  aeskeyHex: string;
+  fileSize: number;
+  fileSizeCiphertext: number;
+  md5: string;
+}
+
+interface DownloadedMedia {
+  imagePaths: string[];
+  filePaths: Array<{ name: string; path: string }>;
+  tempDir: string | null;
 }
 
 interface LoginResult {
@@ -189,7 +248,7 @@ export class WeixinChannel implements IChannel {
     if (!ownerChatId) {
       throw new Error("微信 ownerChatId 未设置，请先给 AnyBot 发一条微信消息");
     }
-    await this.sendText(ownerChatId, text, this.contextTokens.get(ownerChatId));
+    await this.sendReply(ownerChatId, text, this.contextTokens.get(ownerChatId));
   }
 
   private async loginWithQr(): Promise<LoginResult> {
@@ -370,29 +429,57 @@ export class WeixinChannel implements IChannel {
     }
 
     const userText = extractText(message).trim();
+    let media: DownloadedMedia;
+    try {
+      media = await this.downloadMessageMedia(message);
+    } catch (error) {
+      logger.error("weixin.media.download_failed", {
+        chatId,
+        messageId: message.message_id,
+        error,
+      });
+      await this.sendText(chatId, "媒体已收到，但下载失败，请重试。", message.context_token);
+      return;
+    }
+    const effectiveUserText = buildIncomingUserText(userText, media);
     logger.info("weixin.message.received", {
       chatId,
       messageId: message.message_id,
       textChars: userText.length,
+      imageCount: media.imagePaths.length,
+      fileCount: media.filePaths.length,
     });
 
-    if (!userText) {
-      await this.sendText(chatId, "当前微信频道暂只支持文本消息。", message.context_token);
+    if (!effectiveUserText) {
+      await this.sendText(chatId, "当前微信频道支持文本、图片和文件消息。", message.context_token);
       return;
     }
 
-    const cmd = handleCommand(userText, chatId, "weixin", this.callbacks);
-    if (cmd.handled) {
-      if (cmd.reply) await this.sendText(chatId, cmd.reply, message.context_token);
-      return;
+    if (media.imagePaths.length === 0 && media.filePaths.length === 0) {
+      const cmd = handleCommand(userText, chatId, "weixin", this.callbacks);
+      if (cmd.handled) {
+        if (cmd.reply) await this.sendText(chatId, cmd.reply, message.context_token);
+        return;
+      }
     }
 
     try {
-      const reply = await this.callbacks.generateReply(chatId, userText, undefined, "weixin");
-      await this.sendText(chatId, reply, message.context_token);
-    } catch (error) {
-      logger.error("weixin.text.failed", { chatId, error });
-      await this.sendText(chatId, `处理失败：${error instanceof Error ? error.message : String(error)}`, message.context_token);
+      try {
+        const reply = await this.callbacks.generateReply(
+          chatId,
+          effectiveUserText,
+          media.imagePaths.length > 0 ? media.imagePaths : undefined,
+          "weixin",
+        );
+        await this.sendReply(chatId, reply, message.context_token);
+      } catch (error) {
+        logger.error("weixin.text.failed", { chatId, error });
+        await this.sendText(chatId, `处理失败：${error instanceof Error ? error.message : String(error)}`, message.context_token);
+      }
+    } finally {
+      if (media.tempDir) {
+        await rm(media.tempDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 
@@ -479,6 +566,214 @@ export class WeixinChannel implements IChannel {
     logger.info("weixin.send_text.success", { to, clientId });
   }
 
+  private async sendReply(to: string, reply: string, contextToken?: string): Promise<void> {
+    const payload = parseReplyPayload(reply, getWorkdir());
+    logger.info("weixin.send_reply", {
+      to,
+      textChars: payload.text.length,
+      imageCount: payload.imagePaths.length,
+      fileCount: payload.filePaths.length,
+    });
+
+    if (payload.text) {
+      await this.sendText(to, payload.text, contextToken);
+    } else if (payload.imagePaths.length > 0 || payload.filePaths.length > 0) {
+      await this.sendText(to, "请查看附件。", contextToken);
+    }
+
+    for (const imagePath of payload.imagePaths) {
+      await this.sendImage(to, imagePath, contextToken);
+    }
+
+    for (const filePath of payload.filePaths) {
+      await this.sendFile(to, filePath, contextToken);
+    }
+
+    if (!payload.text && payload.imagePaths.length === 0 && payload.filePaths.length === 0) {
+      await this.sendText(to, reply, contextToken);
+    }
+  }
+
+  private async sendImage(to: string, imagePath: string, contextToken?: string): Promise<void> {
+    const uploaded = await this.uploadMedia(imagePath, to, UploadMediaType.IMAGE);
+    await this.sendMessageItems(
+      to,
+      [
+        {
+          type: MessageItemType.IMAGE,
+          image_item: {
+            media: buildCdnMediaRef(uploaded),
+            mid_size: uploaded.fileSizeCiphertext,
+          },
+        },
+      ],
+      contextToken,
+    );
+    logger.info("weixin.send_image.success", { to, imagePath });
+  }
+
+  private async sendFile(to: string, filePath: string, contextToken?: string): Promise<void> {
+    const uploaded = await this.uploadMedia(filePath, to, UploadMediaType.FILE);
+    await this.sendMessageItems(
+      to,
+      [
+        {
+          type: MessageItemType.FILE,
+          file_item: {
+            media: buildCdnMediaRef(uploaded),
+            file_name: path.basename(filePath),
+            md5: uploaded.md5,
+            len: String(uploaded.fileSize),
+          },
+        },
+      ],
+      contextToken,
+    );
+    logger.info("weixin.send_file.success", { to, filePath, fileSize: uploaded.fileSize });
+  }
+
+  private async sendMessageItems(
+    to: string,
+    items: MessageItem[],
+    contextToken?: string,
+  ): Promise<void> {
+    if (!this.config?.token) {
+      throw new Error("Weixin channel is not started");
+    }
+    const clientId = `anybot-weixin:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+    const raw = await apiPost({
+      baseUrl: this.config.baseUrl,
+      endpoint: "ilink/bot/sendmessage",
+      body: {
+        msg: {
+          from_user_id: "",
+          to_user_id: to,
+          client_id: clientId,
+          message_type: MessageType.BOT,
+          message_state: MessageState.FINISH,
+          item_list: items.length > 0 ? items : undefined,
+          context_token: contextToken || this.contextTokens.get(to) || undefined,
+        },
+        base_info: buildBaseInfo(this.config.botAgent),
+      },
+      token: this.config.token,
+      botAgent: this.config.botAgent,
+      label: "weixin.sendmessage",
+      timeoutMs: API_TIMEOUT_MS,
+    });
+    assertIlinkOk(raw, "weixin.sendmessage");
+    logger.info("weixin.send_items.success", { to, clientId, itemCount: items.length });
+  }
+
+  private async uploadMedia(
+    filePath: string,
+    to: string,
+    mediaType: (typeof UploadMediaType)[keyof typeof UploadMediaType],
+  ): Promise<UploadedMedia> {
+    if (!this.config?.token) {
+      throw new Error("Weixin channel is not started");
+    }
+
+    const fileStat = await stat(filePath);
+    if (!fileStat.isFile()) {
+      throw new Error(`Not a sendable file: ${filePath}`);
+    }
+    if (fileStat.size <= 0) {
+      throw new Error(`Cannot send empty file: ${filePath}`);
+    }
+    if (fileStat.size > MAX_WEIXIN_MEDIA_SIZE_BYTES) {
+      throw new Error(`Weixin media exceeds 50MB: ${path.basename(filePath)}`);
+    }
+
+    const plaintext = await readFile(filePath);
+    const rawsize = plaintext.length;
+    const md5 = crypto.createHash("md5").update(plaintext).digest("hex");
+    const filesize = aesEcbPaddedSize(rawsize);
+    const filekey = crypto.randomBytes(16).toString("hex");
+    const aeskey = crypto.randomBytes(16);
+    const aeskeyHex = aeskey.toString("hex");
+    const uploadUrl = await this.getUploadUrl({
+      filekey,
+      media_type: mediaType,
+      to_user_id: to,
+      rawsize,
+      rawfilemd5: md5,
+      filesize,
+      no_need_thumb: true,
+      aeskey: aeskeyHex,
+    });
+    const downloadEncryptedQueryParam = await uploadBufferToCdn({
+      plaintext,
+      uploadParam: uploadUrl.upload_param,
+      uploadFullUrl: uploadUrl.upload_full_url,
+      filekey,
+      aeskey,
+    });
+
+    return {
+      downloadEncryptedQueryParam,
+      aeskeyHex,
+      fileSize: rawsize,
+      fileSizeCiphertext: filesize,
+      md5,
+    };
+  }
+
+  private async getUploadUrl(body: Record<string, unknown>): Promise<GetUploadUrlResp> {
+    if (!this.config?.token) {
+      throw new Error("Weixin channel is not started");
+    }
+    const raw = await apiPost({
+      baseUrl: this.config.baseUrl,
+      endpoint: "ilink/bot/getuploadurl",
+      body: {
+        ...body,
+        base_info: buildBaseInfo(this.config.botAgent),
+      },
+      token: this.config.token,
+      botAgent: this.config.botAgent,
+      label: "weixin.getuploadurl",
+      timeoutMs: API_TIMEOUT_MS,
+    });
+    assertIlinkOk(raw, "weixin.getuploadurl");
+    const parsed = JSON.parse(raw) as GetUploadUrlResp;
+    if (!parsed.upload_param && !parsed.upload_full_url) {
+      throw new Error(`weixin.getuploadurl returned no upload URL: ${raw}`);
+    }
+    return parsed;
+  }
+
+  private async downloadMessageMedia(message: WeixinMessage): Promise<DownloadedMedia> {
+    const result: DownloadedMedia = { imagePaths: [], filePaths: [], tempDir: null };
+    let mediaIndex = 0;
+
+    const ensureTempDir = async () => {
+      result.tempDir ??= await mkdtemp(path.join(tmpdir(), "anybot-weixin-media-"));
+      return result.tempDir;
+    };
+
+    for (const item of message.item_list ?? []) {
+      if (item.type === MessageItemType.IMAGE && item.image_item?.media) {
+        const tempDir = await ensureTempDir();
+        const filePath = path.join(tempDir, `image-${mediaIndex++}${inferImageExtension(item.image_item)}`);
+        await downloadCdnMedia(item.image_item.media, item.image_item.aeskey, filePath);
+        result.imagePaths.push(filePath);
+      } else if (item.type === MessageItemType.FILE && item.file_item?.media) {
+        const tempDir = await ensureTempDir();
+        const fileName = safeIncomingFileName(item.file_item.file_name || `file-${mediaIndex}.bin`);
+        const filePath = path.join(tempDir, `${mediaIndex++}-${fileName}`);
+        await downloadCdnMedia(item.file_item.media, undefined, filePath);
+        if (isSupportedImagePath(filePath)) {
+          result.imagePaths.push(filePath);
+        } else {
+          result.filePaths.push({ name: fileName, path: filePath });
+        }
+      }
+    }
+
+    return result;
+  }
+
   private async notifyStart(): Promise<void> {
     if (!this.config?.token) return;
     try {
@@ -511,6 +806,199 @@ export class WeixinChannel implements IChannel {
     } catch (error) {
       logger.warn("weixin.notifystop.failed", { error });
     }
+  }
+}
+
+function buildIncomingUserText(rawText: string, media: DownloadedMedia): string {
+  const parts: string[] = [];
+  if (rawText) {
+    parts.push(rawText);
+  } else if (media.imagePaths.length > 0) {
+    parts.push(
+      "用户发来了图片。请先根据图片内容直接回答；如果缺少上下文，就先简要描述图片里有什么，并询问对方希望你进一步做什么。",
+    );
+  }
+
+  if (media.filePaths.length > 0) {
+    const fileList = media.filePaths.map((f) => `- ${f.name}: ${f.path}`).join("\n");
+    parts.push(`用户附带了以下文件，请按需读取并处理：\n${fileList}`);
+  }
+
+  if (media.imagePaths.length > 0) {
+    const imageList = media.imagePaths.map((p) => `- ${path.basename(p)}: ${p}`).join("\n");
+    parts.push(`用户附带了以下图片：\n${imageList}`);
+  }
+
+  return parts.join("\n\n").trim();
+}
+
+function buildCdnMediaRef(uploaded: UploadedMedia): CDNMedia {
+  return {
+    encrypt_query_param: uploaded.downloadEncryptedQueryParam,
+    aes_key: Buffer.from(uploaded.aeskeyHex, "utf-8").toString("base64"),
+    encrypt_type: 1,
+  };
+}
+
+function aesEcbPaddedSize(plaintextSize: number): number {
+  return Math.ceil((plaintextSize + 1) / 16) * 16;
+}
+
+function encryptAesEcb(plaintext: Buffer, key: Buffer): Buffer {
+  const cipher = crypto.createCipheriv("aes-128-ecb", key, null);
+  return Buffer.concat([cipher.update(plaintext), cipher.final()]);
+}
+
+function decryptAesEcb(ciphertext: Buffer, key: Buffer): Buffer {
+  const decipher = crypto.createDecipheriv("aes-128-ecb", key, null);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+}
+
+function decodeAesKey(encoded?: string): Buffer {
+  const value = encoded?.trim();
+  if (!value) {
+    throw new Error("Missing Weixin media AES key");
+  }
+  if (/^[0-9a-f]{32}$/i.test(value)) {
+    return Buffer.from(value, "hex");
+  }
+
+  const decoded = Buffer.from(value, "base64");
+  if (decoded.length === 16) {
+    return decoded;
+  }
+
+  const decodedText = decoded.toString("utf-8").trim();
+  if (/^[0-9a-f]{32}$/i.test(decodedText)) {
+    return Buffer.from(decodedText, "hex");
+  }
+
+  throw new Error("Invalid Weixin media AES key");
+}
+
+function buildCdnUploadUrl(params: {
+  uploadParam?: string;
+  uploadFullUrl?: string;
+  filekey: string;
+}): string {
+  if (params.uploadFullUrl?.trim()) {
+    return params.uploadFullUrl.trim();
+  }
+  if (!params.uploadParam?.trim()) {
+    throw new Error("Missing Weixin CDN upload param");
+  }
+  return `${CDN_BASE_URL}/upload?encrypted_query_param=${encodeURIComponent(params.uploadParam)}&filekey=${encodeURIComponent(params.filekey)}`;
+}
+
+function buildCdnDownloadUrl(media: CDNMedia): string {
+  const encryptedQueryParam = media.encrypt_query_param?.trim();
+  if (!encryptedQueryParam) {
+    throw new Error("Missing Weixin CDN download param");
+  }
+  return `${CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(encryptedQueryParam)}`;
+}
+
+async function uploadBufferToCdn(params: {
+  plaintext: Buffer;
+  uploadParam?: string;
+  uploadFullUrl?: string;
+  filekey: string;
+  aeskey: Buffer;
+}): Promise<string> {
+  const ciphertext = encryptAesEcb(params.plaintext, params.aeskey);
+  const url = buildCdnUploadUrl(params);
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const res = await fetchWithTimeout(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Uint8Array(ciphertext),
+      }, CDN_UPLOAD_TIMEOUT_MS);
+      if (res.status >= 400 && res.status < 500) {
+        const detail = res.headers.get("x-error-message") || await res.text();
+        throw new Error(`Weixin CDN upload client error ${res.status}: ${detail}`);
+      }
+      if (res.status !== 200) {
+        const detail = res.headers.get("x-error-message") || `status ${res.status}`;
+        throw new Error(`Weixin CDN upload server error: ${detail}`);
+      }
+      const downloadParam = res.headers.get("x-encrypted-param");
+      if (!downloadParam) {
+        throw new Error("Weixin CDN upload response missing x-encrypted-param");
+      }
+      return downloadParam;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof Error && error.message.includes("client error")) {
+        throw error;
+      }
+      if (attempt < 3) {
+        await sleep(500 * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Weixin CDN upload failed");
+}
+
+async function downloadCdnMedia(media: CDNMedia, imageAesKey: string | undefined, filePath: string): Promise<void> {
+  const key = decodeAesKey(imageAesKey || media.aes_key);
+  const res = await fetchWithTimeout(buildCdnDownloadUrl(media), {
+    method: "GET",
+  }, CDN_DOWNLOAD_TIMEOUT_MS);
+  if (!res.ok) {
+    throw new Error(`Weixin CDN download failed ${res.status}: ${await res.text()}`);
+  }
+  const ciphertext = Buffer.from(await res.arrayBuffer());
+  const plaintext = decryptAesEcb(ciphertext, key);
+  await writeFile(filePath, plaintext);
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function inferImageExtension(image: ImageItem): string {
+  let urlExt = "";
+  try {
+    urlExt = image.url ? path.extname(new URL(image.url, "https://example.invalid").pathname).toLowerCase() : "";
+  } catch {
+    urlExt = "";
+  }
+  if ([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".ico"].includes(urlExt)) {
+    return urlExt;
+  }
+  return ".jpg";
+}
+
+function safeIncomingFileName(fileName: string): string {
+  const base = path.basename(fileName).replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim();
+  return base || "file.bin";
+}
+
+function assertIlinkOk(raw: string, label: string): void {
+  try {
+    const parsed = JSON.parse(raw) as { ret?: number; errcode?: number; errmsg?: string };
+    const failed =
+      (parsed.ret !== undefined && parsed.ret !== 0) ||
+      (parsed.errcode !== undefined && parsed.errcode !== 0);
+    if (failed) {
+      throw new Error(`${label} failed: ${raw}`);
+    }
+  } catch (error) {
+    if (error instanceof SyntaxError) return;
+    throw error;
   }
 }
 
