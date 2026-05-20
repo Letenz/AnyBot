@@ -161,25 +161,84 @@
     color: #f87171;
 }
 
+.claude-task-section {
+    margin: 0 0 12px;
+}
+
+.claude-task-section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 7px;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.claude-task-section-title {
+    font-weight: 650;
+    color: var(--text);
+}
+
+.claude-task-section-meta {
+    color: var(--text-muted);
+}
+
+.claude-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
 .claude-task-item {
-    border-left: 2px solid var(--border);
-    padding-left: 10px;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
 }
 
 .claude-task-summary {
     list-style: none;
     cursor: pointer;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+    min-width: 0;
 }
 
 .claude-task-summary::-webkit-details-marker {
     display: none;
 }
 
-.claude-task-summary-text {
-    color: inherit;
+.claude-task-status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--text-muted);
+    flex: 0 0 auto;
+}
+
+.claude-task-summary-main {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+    flex: 1;
+}
+
+.claude-task-title {
+    min-width: 0;
+    color: var(--text);
+    font-weight: 550;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.claude-task-meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    white-space: nowrap;
 }
 
 .claude-task-chevron {
@@ -195,6 +254,9 @@
 
 .claude-task-steps {
     margin-top: 7px;
+    margin-left: 15px;
+    padding-left: 11px;
+    border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -212,13 +274,24 @@
     color: var(--text-muted);
 }
 
-.claude-task-item.completed {
-    color: #86efac;
+.claude-task-item.running .claude-task-status-dot,
+.claude-task-item.pending .claude-task-status-dot {
+    background: var(--text-muted);
+}
+
+.claude-task-item.completed .claude-task-status-dot {
+    background: #22c55e;
 }
 
 .claude-task-item.stopped,
 .claude-task-item.killed {
     color: var(--text-muted);
+}
+
+.claude-task-item.failed .claude-task-status-dot,
+.claude-task-item.stopped .claude-task-status-dot,
+.claude-task-item.killed .claude-task-status-dot {
+    background: #f87171;
 }
 
 .claude-activity-item.shell {
