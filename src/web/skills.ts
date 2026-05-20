@@ -55,18 +55,23 @@ const PROVIDER_SKILL_DIRS: Record<string, () => SkillSource[]> = {
   },
 };
 
-function getSkillSources(): SkillSource[] {
+function getConfiguredSkillSources(): SkillSource[] {
   const providerType = getProvider().type;
   const factory = PROVIDER_SKILL_DIRS[providerType] ?? PROVIDER_SKILL_DIRS.codex!;
-  const sources = factory();
+  return factory();
+}
 
-  return sources.filter((s) => {
-    try {
-      return fs.statSync(s.dir).isDirectory();
-    } catch {
-      return false;
-    }
-  });
+function ensureSkillSourceDir(source: SkillSource): boolean {
+  try {
+    fs.mkdirSync(source.dir, { recursive: true });
+    return fs.statSync(source.dir).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function getSkillSources(): SkillSource[] {
+  return getConfiguredSkillSources().filter(ensureSkillSourceDir);
 }
 
 function getDisabledSkillsPath(): string {
@@ -302,8 +307,10 @@ export function openSkillsFolder(skillPath?: string): void {
     return;
   }
 
-  const defaultDir = path.join(getCodexHome(), "skills");
-  const baseDir = getSkillSources()[0]?.dir || defaultDir;
+  const baseDir =
+    getSkillSources()[0]?.dir ||
+    getConfiguredSkillSources()[0]?.dir ||
+    path.join(getCodexHome(), "skills");
   const dirs = new Set<string>();
 
   try {
