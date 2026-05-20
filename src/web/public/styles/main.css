@@ -2292,6 +2292,54 @@
             border: 1px solid var(--border);
         }
 
+        .message-user-line {
+            display: flex;
+            align-items: baseline;
+            flex-wrap: wrap;
+            column-gap: 6px;
+            row-gap: 3px;
+        }
+
+        .message-user-text {
+            min-width: 0;
+            max-width: 100%;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        .message-skills {
+            display: inline-flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            vertical-align: baseline;
+        }
+
+        .message-skill-ref {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+            max-width: 180px;
+            color: var(--link);
+            font-weight: 600;
+            line-height: 1.2;
+            border-bottom: 1px solid var(--link-border);
+        }
+
+        .message-skill-icon {
+            width: 14px;
+            height: 14px;
+            flex-shrink: 0;
+        }
+
+        .message-skill-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .message-row.ai .message-content {
             background: var(--ai-bubble);
             border: none;

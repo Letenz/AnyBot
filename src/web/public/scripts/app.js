@@ -140,6 +140,7 @@
         let inputHistoryItems = [];
         let inputHistoryCursor = null;
         let inputHistoryDraft = '';
+        let inputHistoryDraftSkills = [];
         let inputHistoryOldestFetchedMessageId = null;
         let inputHistoryHasMore = false;
         let inputHistoryFetchPromise = null;
@@ -421,17 +422,26 @@
         function resetInputHistoryNavigation() {
             inputHistoryCursor = null;
             inputHistoryDraft = '';
+            inputHistoryDraftSkills = [];
             inputHistoryNavigationPromise = null;
             inputHistoryNavigationVersion += 1;
         }
 
+        function getHistoryVisibleContent(content, skills) {
+            var value = String(content || '').trim();
+            return isSkillOnlyFallback(value, skills) ? '' : value;
+        }
+
         function createInputHistoryItem(message) {
             if (!message || message.role !== 'user') return null;
-            var content = String(message.content || '').trim();
-            if (!content || content === '[附件]') return null;
+            var meta = parseMessageMetadata(message.metadata);
+            var skills = normalizeMessageSkills(meta.skills);
+            var content = getHistoryVisibleContent(message.content, skills);
+            if ((!content && skills.length === 0) || (content === '[附件]' && skills.length === 0)) return null;
             return {
                 id: Number(message.id || 0) || null,
                 content: content,
+                skills: skills,
                 contentTruncated: !!message.contentTruncated,
             };
         }
@@ -475,19 +485,24 @@
             return addedCount;
         }
 
-        function rememberSentUserMessage(text) {
+        function rememberSentUserMessage(text, skills) {
             var content = String(text || '').trim();
-            if (!content) return;
+            var itemSkills = normalizeMessageSkills(skills);
+            if (!content && itemSkills.length === 0) return;
             inputHistoryItems.push({
                 id: null,
                 content: content,
+                skills: itemSkills,
                 contentTruncated: false,
             });
             resetInputHistoryNavigation();
         }
 
-        function setChatInputValue(value) {
+        function setChatInputDraft(value, skills) {
             inputEl.value = value;
+            promptSkills = normalizeMessageSkills(skills);
+            promptSkillDeleteIndex = null;
+            renderPromptSkills();
             resizeChatInput();
             updateSendBtnState();
             inputEl.focus();
@@ -553,7 +568,7 @@
                 if (!res.ok) return item.content;
                 var data = await res.json();
                 if (currentSessionId !== requestSessionId || typeof data.content !== 'string') return item.content;
-                item.content = data.content;
+                item.content = getHistoryVisibleContent(data.content, item.skills);
                 item.contentTruncated = false;
             } catch (_) {}
             return item.content;
@@ -565,7 +580,7 @@
             var content = await getInputHistoryItemContent(item);
             if (navigationVersion !== inputHistoryNavigationVersion) return false;
             inputHistoryCursor = index;
-            setChatInputValue(content);
+            setChatInputDraft(content, item.skills);
             return true;
         }
 
@@ -576,7 +591,10 @@
                 if (!currentSessionId) return;
 
                 if (direction < 0) {
-                    if (inputHistoryCursor === null) inputHistoryDraft = inputEl.value;
+                    if (inputHistoryCursor === null) {
+                        inputHistoryDraft = inputEl.value;
+                        inputHistoryDraftSkills = promptSkills.slice();
+                    }
                     if (inputHistoryItems.length === 0) await fetchOlderInputHistoryPage();
 
                     var targetIndex = -1;
@@ -602,8 +620,9 @@
 
                 if (navigationVersion !== inputHistoryNavigationVersion) return;
                 inputHistoryCursor = null;
-                setChatInputValue(inputHistoryDraft);
+                setChatInputDraft(inputHistoryDraft, inputHistoryDraftSkills);
                 inputHistoryDraft = '';
+                inputHistoryDraftSkills = [];
             })().catch(function (e) {
                 console.warn('Failed to navigate input history:', e);
             }).finally(function () {
@@ -737,6 +756,51 @@
                 '<path d="M7 1.2 11.7 3.9v5.4L7 12 2.3 9.3V3.9L7 1.2Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>' +
                 '<path d="M2.6 4.1 7 6.7l4.4-2.6M7 6.7V12" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>' +
                 '</svg>';
+        }
+
+        function normalizeMessageSkills(skills) {
+            if (!Array.isArray(skills)) return [];
+            var seen = {};
+            var normalized = [];
+            skills.forEach(function (skill) {
+                var name = String(skill && skill.name || '').trim();
+                if (!name || seen[name]) return;
+                seen[name] = true;
+                normalized.push({
+                    id: skill && skill.id ? String(skill.id) : '',
+                    name: name,
+                });
+            });
+            return normalized;
+        }
+
+        function getSkillFallbackText(skills) {
+            return '使用技能：' + skills.map(function (skill) { return skill.name; }).join('、');
+        }
+
+        function isSkillOnlyFallback(text, skills) {
+            if (!skills || skills.length === 0) return false;
+            var value = String(text || '').trim();
+            if (!value) return false;
+            var names = skills.map(function (skill) { return skill.name; }).join('、');
+            return value === getSkillFallbackText(skills) ||
+                value === ('使用技能:' + names) ||
+                value === ('本轮请使用这些技能：' + names);
+        }
+
+        function createMessageSkillRefs(skills) {
+            var wrap = document.createElement('span');
+            wrap.className = 'message-skills';
+            skills.forEach(function (skill) {
+                var item = document.createElement('span');
+                item.className = 'message-skill-ref';
+                item.title = '本轮使用技能';
+                item.innerHTML =
+                    getSkillIconHtml('message-skill-icon') +
+                    '<span class="message-skill-name">' + escapeHtml(skill.name) + '</span>';
+                wrap.appendChild(item);
+            });
+            return wrap;
         }
 
         function renderPromptSkills() {
@@ -1366,9 +1430,13 @@
         }
 
         function appendMessage(role, text, attachments, changeReview, opts) {
+            opts = opts || {};
             clearEmpty();
             var row = document.createElement('div');
             row.className = 'message-row ' + role;
+            var messageSkills = role === 'user' ? normalizeMessageSkills(opts.skills) : [];
+            var rawText = String(text || '');
+            var visibleText = isSkillOnlyFallback(rawText, messageSkills) ? '' : rawText;
 
             if (role === 'ai') {
                 var bubble = document.createElement('div');
@@ -1398,9 +1466,20 @@
 
                 var content = document.createElement('div');
                 content.className = 'message-content';
-                var userText = document.createElement('div');
-                userText.textContent = text;
-                content.appendChild(userText);
+                var userLine = document.createElement('div');
+                userLine.className = 'message-user-line';
+                if (messageSkills.length > 0) {
+                    userLine.appendChild(createMessageSkillRefs(messageSkills));
+                }
+                var userText = document.createElement('span');
+                userText.className = 'message-user-text';
+                userText.textContent = visibleText;
+                if (visibleText || (opts && opts.contentTruncated && opts.messageId)) {
+                    userLine.appendChild(userText);
+                }
+                if (userLine.childNodes.length > 0) {
+                    content.appendChild(userLine);
+                }
                 if (opts && opts.contentTruncated && opts.messageId) {
                     var userExpand = document.createElement('button');
                     userExpand.className = 'large-message-expand';
@@ -1455,8 +1534,10 @@
             }
 
             attachMessageMeta(row, {
-                createdAt: opts && opts.createdAt,
-                copyText: text,
+                createdAt: opts.createdAt,
+                copyText: role === 'user' && messageSkills.length > 0
+                    ? (visibleText ? getSkillFallbackText(messageSkills) + '\n' + visibleText : getSkillFallbackText(messageSkills))
+                    : rawText,
             });
             messagesEl.appendChild(row);
             scrollBottom();
@@ -1535,6 +1616,7 @@
                     contentTruncated: !!m.contentTruncated,
                     contentChars: m.contentChars,
                     createdAt: m.createdAt,
+                    skills: meta.skills,
                 });
             }
             if (row) {
@@ -2448,10 +2530,7 @@
 
             // 收集附件信息用于显示（包含 path 以便渲染图片）
             var attachmentInfos = readyAttachments.map(function (a) { return { name: a.name, path: a.path }; });
-            var skillDisplayText = messageSkills.length > 0
-                ? '使用技能：' + messageSkills.map(function (skill) { return skill.name; }).join('、')
-                : '';
-            var displayText = text || skillDisplayText || '[附件]';
+            var displayText = text || (readyAttachments.length > 0 ? '[附件]' : '');
 
             inputEl.value = '';
             clearPromptSkills();
@@ -2465,8 +2544,11 @@
             pendingAttachments = [];
             renderAttachmentPreview();
 
-            appendMessage('user', displayText, attachmentInfos, null, { createdAt: Date.now() });
-            rememberSentUserMessage(text);
+            appendMessage('user', displayText, attachmentInfos, null, {
+                createdAt: Date.now(),
+                skills: messageSkills,
+            });
+            rememberSentUserMessage(text, messageSkills);
             showTyping();
 
             // 构建请求体
