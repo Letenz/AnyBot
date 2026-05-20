@@ -68,6 +68,58 @@
     margin-bottom: 0;
 }
 
+.claude-thinking-block {
+    margin: 8px 0 10px;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.claude-thinking-summary {
+    list-style: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-muted);
+    user-select: none;
+}
+
+.claude-thinking-summary::-webkit-details-marker {
+    display: none;
+}
+
+.claude-thinking-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.claude-thinking-chevron {
+    color: var(--text-muted);
+    font-size: 14px;
+    transform: translateY(1px);
+    transition: transform 0.16s ease;
+}
+
+.claude-thinking-block[open] .claude-thinking-chevron {
+    transform: rotate(90deg) translateY(1px);
+}
+
+.claude-thinking-content {
+    margin-top: 8px;
+    border-left: 2px solid var(--border);
+    padding-left: 12px;
+    color: var(--text-muted);
+}
+
+.claude-thinking-content > :first-child {
+    margin-top: 0;
+}
+
+.claude-thinking-content > :last-child {
+    margin-bottom: 0;
+}
+
 .claude-activity-summary {
     align-items: center;
     gap: 9px;

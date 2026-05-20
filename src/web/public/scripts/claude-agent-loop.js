@@ -69,6 +69,8 @@
             answerText: '',
             processTextSegments: [],
             activeProcessTextSegment: null,
+            thinkingSegments: [],
+            activeThinkingSegment: null,
             tools: new Map(),
             readFiles: new Set(),
             searchCount: 0,
@@ -180,7 +182,11 @@
             var hasProcessText = state.processTextSegments.some(function (segment) {
                 return !!String(segment.text || '').trim();
             });
+            var hasThinkingText = state.thinkingSegments.some(function (segment) {
+                return !!String(segment.text || '').trim();
+            });
             return hasProcessText ||
+                hasThinkingText ||
                 state.tools.size > 0 ||
                 state.readFiles.size > 0 ||
                 state.searchCount > 0 ||
@@ -288,6 +294,7 @@
 
         function appendProcessText(text) {
             if (!text) return;
+            state.activeThinkingSegment = null;
             var segment = state.activeProcessTextSegment;
             if (!segment) {
                 var el = document.createElement('div');
@@ -299,6 +306,45 @@
             }
             segment.text += text;
             renderProcessTextSegment(segment);
+            updateProcessAvailability();
+        }
+
+        function renderThinkingSegment(segment) {
+            if (!segment.text) {
+                segment.el.remove();
+                return;
+            }
+            segment.body.innerHTML = renderMarkdown(segment.text);
+            segment.body.querySelectorAll('pre code').forEach(function (block) {
+                if (typeof hljs !== 'undefined') hljs.highlightElement(block);
+            });
+            scrollBottom();
+        }
+
+        function appendThinkingText(text) {
+            if (!text) return;
+            state.activeProcessTextSegment = null;
+            var segment = state.activeThinkingSegment;
+            if (!segment) {
+                var el = document.createElement('details');
+                el.className = 'claude-thinking-block';
+                el.open = !isPersisted;
+                var summary = document.createElement('summary');
+                summary.className = 'claude-thinking-summary';
+                summary.innerHTML =
+                    '<span class="claude-thinking-title">思考过程</span>' +
+                    '<span class="claude-thinking-chevron">›</span>';
+                var body = document.createElement('div');
+                body.className = 'claude-thinking-content';
+                el.appendChild(summary);
+                el.appendChild(body);
+                segment = { el: el, body: body, text: '' };
+                state.thinkingSegments.push(segment);
+                state.activeThinkingSegment = segment;
+                activityList.appendChild(el);
+            }
+            segment.text += text;
+            renderThinkingSegment(segment);
             updateProcessAvailability();
         }
 
@@ -497,6 +543,12 @@
                 return;
             }
 
+            if (event.type === 'thinking_delta') {
+                appendThinkingText(event.text || '');
+                openProcessIfAvailable();
+                return;
+            }
+
             if (event.type === 'result') {
                 removeFinalAnswerFromProcessText(event.content);
                 state.answerText = event.content || state.answerText;
@@ -541,6 +593,7 @@
 
             if (event.type === 'tool_start') {
                 state.activeProcessTextSegment = null;
+                state.activeThinkingSegment = null;
                 ensureTool(event.tool);
                 openProcessIfAvailable();
                 return;

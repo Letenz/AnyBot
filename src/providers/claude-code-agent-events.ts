@@ -26,6 +26,7 @@ export type ClaudeAgentStreamEvent =
       durationMs?: number;
     }
   | { type: "answer_delta"; text: string }
+  | { type: "thinking_delta"; text: string }
   | {
       type: "tool_start";
       tool: {
@@ -96,6 +97,18 @@ export function extractAssistantTextDelta(message: SDKMessage): string | null {
   if (event.type !== "content_block_delta") return null;
   if (event.delta?.type !== "text_delta") return null;
   return event.delta.text ? sanitizeAgentText(event.delta.text) : null;
+}
+
+export function extractAssistantThinkingDelta(message: SDKMessage): string | null {
+  if (message.type !== "stream_event") return null;
+  const partial = message as SDKPartialAssistantMessage;
+  const event = partial.event as {
+    type?: string;
+    delta?: { type?: string; thinking?: string };
+  };
+  if (event.type !== "content_block_delta") return null;
+  if (event.delta?.type !== "thinking_delta") return null;
+  return event.delta.thinking ? sanitizeAgentText(event.delta.thinking) : null;
 }
 
 export function createToolStartEvent(input: HookInput): ClaudeAgentStreamEvent | null {

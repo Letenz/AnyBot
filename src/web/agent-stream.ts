@@ -6,6 +6,7 @@ import type { PublicChangeReview } from "./change-review.js";
 const MAX_PERSISTED_AGENT_EVENTS = 240;
 const MAX_PERSISTED_EVENT_TEXT = 2000;
 const MAX_PERSISTED_DIFF_TEXT = 4000;
+const MAX_PERSISTED_THINKING_TEXT = 4000;
 
 export type AgentStreamEvent =
   | ClaudeAgentStreamEvent
@@ -44,6 +45,7 @@ function truncateForHistory(value: string | undefined, max = MAX_PERSISTED_EVENT
 
 function compactAgentEvent(event: ClaudeAgentStreamEvent): ClaudeAgentStreamEvent | null {
   if (event.type === "answer_delta" || event.type === "tool_progress") return null;
+  if (event.type === "thinking_delta") return null;
   if (event.type === "tool_start") {
     return {
       ...event,
@@ -77,10 +79,44 @@ function compactAgentEvent(event: ClaudeAgentStreamEvent): ClaudeAgentStreamEven
 }
 
 export function compactAgentEvents(events: ClaudeAgentStreamEvent[]): ClaudeAgentStreamEvent[] {
-  return events
-    .map(compactAgentEvent)
-    .filter((event): event is ClaudeAgentStreamEvent => !!event)
-    .slice(-MAX_PERSISTED_AGENT_EVENTS);
+  const compacted: ClaudeAgentStreamEvent[] = [];
+  let pendingThinking = "";
+  let pendingThinkingOmitted = 0;
+
+  const flushThinking = () => {
+    if (!pendingThinking) return;
+    compacted.push({
+      type: "thinking_delta",
+      text:
+        pendingThinkingOmitted > 0
+          ? `${pendingThinking}\n...[已截断 ${pendingThinkingOmitted} 字符]`
+          : pendingThinking,
+    });
+    pendingThinking = "";
+    pendingThinkingOmitted = 0;
+  };
+
+  for (const event of events) {
+    if (event.type === "thinking_delta") {
+      const remaining = MAX_PERSISTED_THINKING_TEXT - pendingThinking.length;
+      if (pendingThinkingOmitted > 0) {
+        pendingThinkingOmitted += event.text.length;
+      } else if (event.text.length <= remaining) {
+        pendingThinking += event.text;
+      } else {
+        pendingThinking += event.text.slice(0, remaining);
+        pendingThinkingOmitted += event.text.length - remaining;
+      }
+      continue;
+    }
+
+    flushThinking();
+    const compact = compactAgentEvent(event);
+    if (compact) compacted.push(compact);
+  }
+
+  flushThinking();
+  return compacted.slice(-MAX_PERSISTED_AGENT_EVENTS);
 }
 
 export function buildAssistantMetadata(opts: {

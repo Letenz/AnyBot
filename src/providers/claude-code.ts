@@ -25,6 +25,7 @@ import {
   createToolEndEvent,
   createToolProgressEvent,
   createToolStartEvent,
+  extractAssistantThinkingDelta,
   extractAssistantTextDelta,
   type ClaudeAgentStreamEvent,
 } from "./claude-code-agent-events.js";
@@ -397,6 +398,11 @@ export class ClaudeCodeProvider implements IProvider {
           const delta = extractAssistantTextDelta(message);
           if (delta) {
             await onEvent({ type: "answer_delta", text: delta });
+          }
+
+          const thinking = extractAssistantThinkingDelta(message);
+          if (thinking) {
+            await onEvent({ type: "thinking_delta", text: thinking });
           }
 
           const progress = createToolProgressEvent(message);
