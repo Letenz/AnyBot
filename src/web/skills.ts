@@ -45,14 +45,6 @@ const PROVIDER_SKILL_DIRS: Record<string, () => SkillSource[]> = {
   "claude-code": () => {
     return [{ label: "Claude Code 技能", dir: path.join(getClaudeConfigDir(), "skills") }];
   },
-  "cursor-cli": () => {
-    const home = os.homedir();
-    return [
-      { label: "Cursor 技能", dir: path.join(home, ".cursor", "skills") },
-      { label: "Cursor 规则技能", dir: path.join(home, ".cursor", "skills-cursor") },
-      { label: "Agents 技能", dir: path.join(home, ".agents", "skills") },
-    ];
-  },
 };
 
 function getSkillSources(): SkillSource[] {

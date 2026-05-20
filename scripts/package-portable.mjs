@@ -255,7 +255,7 @@ exec "$(dirname "$0")/start-anybot.command"
 
 function writeReadme() {
   const providerNote = [
-    "Provider CLIs such as codex/claude/cursor are not bundled.",
+    "Provider CLIs such as codex/claude are not bundled.",
     "Install and login to the Provider CLI you want to use, then make sure it is available in PATH.",
   ].join("\n");
 

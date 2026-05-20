@@ -4,7 +4,7 @@
 
 Turn AI CLI tools into remotely accessible AI assistants — chat through the built-in **Web UI** in your browser, or message the AI running on your machine anytime via **Feishu Bot** / **QQ Bot** / **Telegram Bot** / **personal Weixin** on mobile or desktop.
 
-Currently supports [OpenAI Codex CLI](https://github.com/openai/codex), [Cursor CLI](https://docs.cursor.com/cli), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as Providers.
+Currently supports [OpenAI Codex CLI](https://github.com/openai/codex) and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as Providers.
 
 Supports **macOS**, **Linux**, and **Windows**.
 
@@ -12,7 +12,7 @@ Supports **macOS**, **Linux**, and **Windows**.
 
 ## Features
 
-- **Multi-Provider Architecture** — Pluggable AI backends; currently supports Codex CLI, Claude Code, and Cursor CLI
+- **Multi-Provider Architecture** — Pluggable AI backends; currently supports Codex CLI and Claude Code
 - **Web UI** — Built-in local chat interface with Markdown rendering, code highlighting, and session management
 - **Attachment Support** — Send files via the 📎 button, paste images, or drag-and-drop files in the Web UI (images + any file type, 50MB limit)
 - **Multi-Platform Integration** — Feishu (long connection), QQ Bot (WebSocket), Telegram, and personal Weixin simultaneously — works on mobile too
@@ -63,7 +63,6 @@ Plus at least one configured Provider:
 | Provider | Installation | Note |
 |----------|-------------|------|
 | [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | OpenAI's CLI tool |
-| [Cursor CLI](https://docs.cursor.com/cli) | Enable `agent` command in Cursor settings | Cursor editor's Agent CLI |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Uses your locally logged-in `claude` command; the SDK is included as a project dependency | Anthropic's CLI tool |
 
 <details>
@@ -144,10 +143,9 @@ AnyBot uses a pluggable Provider architecture where each AI CLI tool maps to a P
 | Provider | Status | CLI Tool | Note |
 |----------|--------|----------|------|
 | `codex` | ✅ Available | [Codex CLI](https://github.com/openai/codex) | OpenAI's CLI, supports Sandbox mode |
-| `cursor-cli` | ✅ Available | [Cursor CLI](https://docs.cursor.com/cli) | Cursor's Agent CLI, supports session continuity & Sandbox |
 | `claude-code` | ✅ Available | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic's CLI, supports session continuity and Sandbox mapping |
 
-Switch the default Provider via the `PROVIDER=codex`, `PROVIDER=cursor-cli`, or `PROVIDER=claude-code` environment variable, or switch anytime in the Web UI.
+Switch the default Provider via the `PROVIDER=codex` or `PROVIDER=claude-code` environment variable, or switch anytime in the Web UI.
 
 ---
 
@@ -328,7 +326,7 @@ All channels (Feishu, QQ, Telegram, Weixin) support the following `/` commands:
 | `/help` | Show available commands |
 | `/new` | Start a new session, reset current context |
 | `/provider` | View available providers and current selection |
-| `/provider <name>` | Switch provider, e.g. `/provider cursor-cli` |
+| `/provider <name>` | Switch provider, e.g. `/provider claude-code` |
 | `/model` | View available models for the current provider |
 | `/model <name>` | Switch model, e.g. `/model gpt-5.5` |
 
@@ -351,7 +349,6 @@ After switching Providers, the skill list automatically switches to the correspo
 |----------|----------------|
 | `codex` | `$CODEX_HOME/skills/`, or `~/.codex/skills/` when unset |
 | `claude-code` | `$CLAUDE_CONFIG_DIR/skills/`, or `~/.claude/skills/` when unset |
-| `cursor-cli` | `./.cursor/rules/` |
 
 ---
 
@@ -391,30 +388,7 @@ AnyBot supports centralized proxy settings in the Web UI for Provider requests, 
 
 - Enabling the proxy updates global `HTTP_PROXY` / `HTTPS_PROXY`
 - `localhost`, `127.0.0.1`, `::1`, `*.feishu.cn`, `*.larksuite.com`, and `*.qq.com` are bypassed by default
-- This is useful when you want Codex / Cursor / Telegram to use the same local proxy
-
----
-
-## Troubleshooting
-
-### Cursor CLI Sandbox Error on Linux
-
-**Error message:**
-
-```
-Sandbox mode is enabled but not available on this system.
-Sandbox failed to start, possibly due to AppArmor configuration.
-```
-
-**Cause:** Cursor CLI's Sandbox mode depends on kernel-level process isolation. On Linux (especially Ubuntu), AppArmor must be properly configured. VPS, Docker containers, or non-desktop Linux environments usually don't meet the requirements.macOS uses a different sandbox mechanism and is unaffected.
-
-**Solution:** Run the following command on your Linux server to disable Cursor CLI's global sandbox setting:
-
-```bash
-agent sandbox disable
-```
-
-AnyBot already handles this at the code level — on Linux it automatically runs Cursor CLI with `--sandbox disabled`. If you still get the error, make sure you've run the command above.
+- This is useful when you want Codex / Claude Code / Telegram to use the same local proxy
 
 ---
 
@@ -426,7 +400,7 @@ AnyBot no longer reads `.env` files. Common settings such as provider, model, an
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROVIDER` | `codex` | Provider to use: `codex`, `cursor-cli`, `claude-code` |
+| `PROVIDER` | `codex` | Provider to use: `codex`, `claude-code` |
 | `WEB_PORT` | `19981` | Web UI port |
 | `LOG_LEVEL` | `info` | Log level: `debug` / `info` / `warn` / `error` |
 | `LOG_INCLUDE_CONTENT` | `false` | Include message content in logs (for debugging) |
@@ -441,14 +415,6 @@ AnyBot no longer reads `.env` files. Common settings such as provider, model, an
 | `CODEX_SANDBOX` | `read-only` | Safety mode: `read-only` / `workspace-write` / `danger-full-access` |
 | `CODEX_SYSTEM_PROMPT` | — | Custom system prompt appended to the built-in prompt |
 | `CODEX_WORKDIR` | Current directory | Working directory |
-
-### Cursor CLI
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CURSOR_CLI_BIN` | `agent` | Path to the Cursor Agent CLI executable |
-| `CURSOR_CLI_WORKSPACE` | — | Workspace path (optional, defaults to working directory) |
-| `CURSOR_API_KEY` | — | API Key (optional, can also use a logged-in Cursor account) |
 
 ### Claude Code
 
@@ -535,7 +501,6 @@ AnyBot/
 │   │   ├── types.ts        # IProvider interface definition
 │   │   ├── index.ts        # ProviderManager (factory + registry)
 │   │   ├── codex.ts        # Codex CLI Provider implementation
-│   │   ├── cursor-cli.ts   # Cursor CLI Provider implementation
 │   │   └── claude-code.ts  # Claude Code Provider implementation
 │   ├── lark.ts             # Feishu API (messages, files, images)
 │   ├── logger.ts           # Structured logging
@@ -582,7 +547,7 @@ AnyBot's Provider architecture is extensible. Adding a new CLI tool takes just t
 2. **Register with the factory** — Add a new entry to `providerFactories` in `src/providers/index.ts`
 3. **Add environment variables** — Read the corresponding env vars in `getProviderConfig()` in `src/index.ts`
 
-Refer to `src/providers/codex.ts` and `src/providers/cursor-cli.ts` as implementation templates.
+Refer to `src/providers/codex.ts` and `src/providers/claude-code.ts` as implementation templates.
 
 ---
 
