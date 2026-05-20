@@ -2724,7 +2724,6 @@
 
         const SETTINGS_TAB_META = {
             general: ['常规', '外观主题和默认权限'],
-            network: ['网络', '代理服务器和出站连接配置'],
             provider: ['提供商', '提供商配置'],
             workspace: ['工作区', '默认工作目录和项目入口'],
             privacy: ['隐私与日志', '日志目录和清理操作'],
@@ -2860,7 +2859,6 @@
             });
             if (settingsTitle) settingsTitle.textContent = SETTINGS_TAB_META[tab][0];
             if (settingsSubtitle) settingsSubtitle.textContent = SETTINGS_TAB_META[tab][1];
-            if (tab === 'network') renderNetworkSettings();
         }
 
         settingsNavItems.forEach(function (item) {
