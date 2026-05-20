@@ -70,15 +70,15 @@ export class TelegramChannel implements IChannel {
   private pollAbort: AbortController | null = null;
   private botUsername: string | null = null;
 
-  async start(callbacks: ChannelCallbacks): Promise<void> {
+  async start(callbacks: ChannelCallbacks): Promise<boolean> {
     const config = readChannelConfig<TelegramChannelConfig>("telegram");
     if (!config || !config.enabled) {
       logger.info("telegram.skipped", { reason: "disabled or missing config" });
-      return;
+      return false;
     }
     if (!config.token) {
       logger.warn("telegram.skipped", { reason: "missing token" });
-      return;
+      return false;
     }
 
     this.config = config;
@@ -95,6 +95,7 @@ export class TelegramChannel implements IChannel {
 
     this.polling = true;
     this.poll();
+    return true;
   }
 
   async stop(): Promise<void> {

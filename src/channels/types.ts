@@ -71,7 +71,7 @@ export interface ChannelCallbacks {
 
 export interface IChannel {
   readonly type: string;
-  start(callbacks: ChannelCallbacks): Promise<void>;
+  start(callbacks: ChannelCallbacks): Promise<boolean>;
   stop(): Promise<void>;
   sendToOwner(text: string): Promise<void>;
 }

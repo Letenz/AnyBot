@@ -37,7 +37,11 @@ class ChannelManager {
 
       try {
         const channel = factory();
-        await channel.start(callbacks);
+        const didStart = await channel.start(callbacks);
+        if (!didStart) {
+          logger.info("channel.not_started", { type });
+          continue;
+        }
         this.runningChannels.set(type, channel);
         started.push(channel);
         logger.info("channel.started", { type });
@@ -89,7 +93,11 @@ class ChannelManager {
 
     try {
       const channel = factory();
-      await channel.start(this.callbacks);
+      const didStart = await channel.start(this.callbacks);
+      if (!didStart) {
+        logger.info("channel.restart.not_started", { type });
+        return;
+      }
       this.runningChannels.set(type, channel);
       logger.info("channel.restarted", { type });
     } catch (error) {

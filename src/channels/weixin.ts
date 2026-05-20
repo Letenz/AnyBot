@@ -128,11 +128,11 @@ export class WeixinChannel implements IChannel {
   private contextTokens = new Map<string, string>();
   private getUpdatesBuf = "";
 
-  async start(callbacks: ChannelCallbacks): Promise<void> {
+  async start(callbacks: ChannelCallbacks): Promise<boolean> {
     const config = readChannelConfig<WeixinChannelConfig>("weixin");
     if (!config?.enabled) {
       logger.info("weixin.skipped", { reason: "disabled or missing config" });
-      return;
+      return false;
     }
 
     this.callbacks = callbacks;
@@ -170,6 +170,7 @@ export class WeixinChannel implements IChannel {
       accountId: this.config.accountId,
       ownerChatId: this.config.ownerChatId,
     });
+    return true;
   }
 
   async stop(): Promise<void> {

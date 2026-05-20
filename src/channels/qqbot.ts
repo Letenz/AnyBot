@@ -21,15 +21,15 @@ export class QQBotChannel implements IChannel {
   private tokenExpiresAt: number = 0;
   private queueByChat = new Map<string, Promise<void>>();
 
-  async start(callbacks: ChannelCallbacks): Promise<void> {
+  async start(callbacks: ChannelCallbacks): Promise<boolean> {
     const config = readChannelConfig<QQBotChannelConfig>("qqbot");
     if (!config || !config.enabled) {
       logger.info("qqbot.skipped", { reason: "disabled or missing config" });
-      return;
+      return false;
     }
     if (!config.appId || !config.appSecret) {
       logger.warn("qqbot.skipped", { reason: "missing appId or appSecret" });
-      return;
+      return false;
     }
 
     this.config = config;
@@ -37,8 +37,10 @@ export class QQBotChannel implements IChannel {
     
     try {
       await this.connect();
+      return true;
     } catch (e) {
       logger.error("qqbot.start_failed", { error: e });
+      return false;
     }
   }
 

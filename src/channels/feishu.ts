@@ -50,15 +50,15 @@ export class FeishuChannel implements IChannel {
   private workdir = process.env.CODEX_WORKDIR || process.cwd();
   private startedAtMs: number = 0;
 
-  async start(callbacks: ChannelCallbacks): Promise<void> {
+  async start(callbacks: ChannelCallbacks): Promise<boolean> {
     const config = readChannelConfig<FeishuChannelConfig>("feishu");
     if (!config || !config.enabled) {
       logger.info("feishu.skipped", { reason: "disabled or missing config" });
-      return;
+      return false;
     }
     if (!config.appId || !config.appSecret) {
       logger.warn("feishu.skipped", { reason: "missing appId or appSecret" });
-      return;
+      return false;
     }
 
     this.config = config;
@@ -92,6 +92,7 @@ export class FeishuChannel implements IChannel {
       groupChatMode: config.groupChatMode,
       ackReaction: config.ackReaction,
     });
+    return true;
   }
 
   async stop(): Promise<void> {
