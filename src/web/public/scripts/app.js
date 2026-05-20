@@ -170,11 +170,20 @@
         const HIGHLIGHT_LIGHT_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
         const SIDEBAR_REFRESH_INTERVAL_MS = 5000;
         const CURRENT_SESSION_REFRESH_INTERVAL_MS = 2000;
+        const CHAT_INPUT_PLACEHOLDERS = [
+            '发送消息... 输入 / 使用技能',
+            '按 ↑ / ↓ 切换历史消息',
+            '可粘贴图片或拖拽文件',
+            'Enter 发送，Shift+Enter 换行',
+        ];
+        const CHAT_INPUT_PLACEHOLDER_INTERVAL_MS = 10000;
         const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
         let currentThemeSetting = readStoredTheme();
         let sidebarRefreshTimer = null;
         let currentSessionRefreshTimer = null;
         let isSidebarRefreshInFlight = false;
+        let chatInputPlaceholderIndex = 0;
+        let chatInputPlaceholderTimer = null;
 
         // 附件相关
         const fileInput = document.getElementById('file-input');
@@ -1780,6 +1789,19 @@
 
         function saveStoredSet(key, value) {
             localStorage.setItem(key, JSON.stringify(Array.from(value)));
+        }
+
+        function updateChatInputPlaceholder() {
+            inputEl.placeholder = CHAT_INPUT_PLACEHOLDERS[chatInputPlaceholderIndex];
+        }
+
+        function startChatInputPlaceholderRotation() {
+            if (chatInputPlaceholderTimer) return;
+            updateChatInputPlaceholder();
+            chatInputPlaceholderTimer = setInterval(function () {
+                chatInputPlaceholderIndex = (chatInputPlaceholderIndex + 1) % CHAT_INPUT_PLACEHOLDERS.length;
+                updateChatInputPlaceholder();
+            }, CHAT_INPUT_PLACEHOLDER_INTERVAL_MS);
         }
 
         function folderIcon(open) {
@@ -4817,6 +4839,7 @@
         });
 
         async function init() {
+            startChatInputPlaceholderRotation();
             updateProjectsCollapsedState();
             updateHistoryCollapsedState();
             await Promise.all([fetchProjects(), fetchSessions(), fetchModelConfig(), fetchProviders(), fetchSandboxConfig(), fetchAppSettings(), fetchProxyConfig()]);
