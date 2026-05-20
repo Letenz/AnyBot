@@ -1496,6 +1496,76 @@
             min-width: 0;
         }
 
+        .provider-model-input-control {
+            position: relative;
+            flex: 0 1 320px;
+            min-width: 180px;
+        }
+
+        .provider-model-input-control .settings-inline-input {
+            width: 100%;
+            min-width: 0;
+        }
+
+        .provider-model-suggest-menu {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: calc(100% + 6px);
+            z-index: 60;
+            display: none;
+            max-height: 168px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            background: var(--popover-bg);
+            box-shadow: 0 14px 34px var(--popover-shadow);
+            padding: 5px;
+        }
+
+        .provider-model-input-control.open .provider-model-suggest-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .provider-model-suggest-option {
+            min-height: 32px;
+            border: none;
+            border-radius: 7px;
+            background: transparent;
+            color: var(--text);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 0 8px;
+            font-family: 'Sora', sans-serif;
+            font-size: 12px;
+            text-align: left;
+        }
+
+        .provider-model-suggest-option:hover,
+        .provider-model-suggest-option:focus-visible {
+            background: var(--subtle-hover);
+            outline: none;
+        }
+
+        .provider-model-suggest-name {
+            min-width: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .provider-model-suggest-source {
+            color: var(--text-dim);
+            font-size: 11px;
+            flex-shrink: 0;
+        }
+
         .settings-secondary-btn.compact,
         .settings-danger-btn.compact {
             min-width: 0;

@@ -2940,13 +2940,169 @@
             },
         };
 
+        var PROVIDER_MODEL_SUGGESTION_STRATEGIES = [
+            {
+                id: 'deepseek',
+                label: 'DeepSeek',
+                matchUrl: function (url) {
+                    return String(url || '').toLowerCase().indexOf('api.deepseek.com') !== -1;
+                },
+                models: [
+                    'deepseek-v4-flash',
+                    'deepseek-v4-pro[1m]',
+                    'deepseek-v4-pro',
+                ],
+            },
+        ];
+
         function getProviderSettingsDefinition(providerType) {
             return PROVIDER_SETTINGS_DEFINITIONS[providerType] || null;
+        }
+
+        function getProviderModelSuggestionStrategy(baseUrl) {
+            return PROVIDER_MODEL_SUGGESTION_STRATEGIES.find(function (strategy) {
+                return strategy.matchUrl(baseUrl);
+            }) || null;
+        }
+
+        function getProviderModelSuggestions(baseUrl) {
+            var strategy = getProviderModelSuggestionStrategy(baseUrl);
+            if (!strategy) return [];
+            return strategy.models.map(function (model) {
+                return {
+                    id: model,
+                    label: model,
+                    source: strategy.label,
+                };
+            });
+        }
+
+        function buildProviderModelInput(id, value) {
+            return '<div class="provider-model-input-control">' +
+                '<input class="settings-inline-input provider-model-input" id="' + escapeAttr(id) + '"' +
+                ' data-provider-model-suggestion-input="true" value="' + escapeAttr(value || '') + '"' +
+                ' spellcheck="false" autocomplete="off">' +
+                '<div class="provider-model-suggest-menu" role="listbox"></div>' +
+                '</div>';
+        }
+
+        function closeProviderModelSuggestionMenus() {
+            Array.prototype.forEach.call(document.querySelectorAll('.provider-model-input-control.open'), function (control) {
+                control.classList.remove('open');
+                var input = control.querySelector('[data-provider-model-suggestion-input="true"]');
+                if (input) input.setAttribute('aria-expanded', 'false');
+            });
+        }
+
+        function getProviderModelSuggestionBaseUrl() {
+            var input = document.getElementById('settings-provider-anthropic-base-url');
+            return input ? input.value.trim() : '';
+        }
+
+        function showProviderModelSuggestionMenu(input) {
+            if (!input) return;
+            var control = input.closest('.provider-model-input-control');
+            if (!control) return;
+            var menu = control.querySelector('.provider-model-suggest-menu');
+            if (!menu) return;
+
+            var suggestions = getProviderModelSuggestions(getProviderModelSuggestionBaseUrl());
+            closeProviderModelSuggestionMenus();
+            menu.innerHTML = '';
+            if (suggestions.length === 0) return;
+
+            suggestions.forEach(function (suggestion) {
+                var option = document.createElement('button');
+                option.className = 'provider-model-suggest-option';
+                option.type = 'button';
+                option.setAttribute('role', 'option');
+                option.dataset.value = suggestion.id;
+                option.innerHTML =
+                    '<span class="provider-model-suggest-name">' + escapeHtml(suggestion.label) + '</span>' +
+                    '<span class="provider-model-suggest-source">' + escapeHtml(suggestion.source) + '</span>';
+                option.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                });
+                option.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    input.value = suggestion.id;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    closeProviderModelSuggestionMenus();
+                    input.focus();
+                });
+                option.addEventListener('keydown', handleProviderModelSuggestionOptionKeydown);
+                menu.appendChild(option);
+            });
+            control.classList.add('open');
+            input.setAttribute('aria-expanded', 'true');
+        }
+
+        function getOpenProviderModelSuggestionOptions() {
+            var menu = document.querySelector('.provider-model-input-control.open .provider-model-suggest-menu');
+            return menu ? Array.prototype.slice.call(menu.querySelectorAll('.provider-model-suggest-option')) : [];
+        }
+
+        function handleProviderModelSuggestionInputKeydown(e) {
+            if (e.key === 'ArrowDown') {
+                var options = getOpenProviderModelSuggestionOptions();
+                if (options.length === 0) showProviderModelSuggestionMenu(e.currentTarget);
+                options = getOpenProviderModelSuggestionOptions();
+                if (options.length > 0) {
+                    e.preventDefault();
+                    options[0].focus();
+                }
+            } else if (e.key === 'Escape') {
+                closeProviderModelSuggestionMenus();
+            }
+        }
+
+        function handleProviderModelSuggestionOptionKeydown(e) {
+            var options = getOpenProviderModelSuggestionOptions();
+            var index = options.indexOf(e.currentTarget);
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (options.length === 0) return;
+                var delta = e.key === 'ArrowDown' ? 1 : -1;
+                options[(index + delta + options.length) % options.length].focus();
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.currentTarget.click();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                var control = e.currentTarget.closest('.provider-model-input-control');
+                var input = control && control.querySelector('[data-provider-model-suggestion-input="true"]');
+                closeProviderModelSuggestionMenus();
+                if (input) input.focus();
+            }
+        }
+
+        function bindProviderModelSuggestionInputs() {
+            var baseUrlInput = document.getElementById('settings-provider-anthropic-base-url');
+            var modelInputs = Array.prototype.slice.call(document.querySelectorAll('[data-provider-model-suggestion-input="true"]'));
+            if (baseUrlInput) {
+                baseUrlInput.addEventListener('input', function () {
+                    var openInput = document.querySelector('.provider-model-input-control.open [data-provider-model-suggestion-input="true"]');
+                    if (openInput) showProviderModelSuggestionMenu(openInput);
+                });
+            }
+            modelInputs.forEach(function (input) {
+                input.setAttribute('aria-haspopup', 'listbox');
+                input.setAttribute('aria-expanded', 'false');
+                input.addEventListener('focus', function () {
+                    showProviderModelSuggestionMenu(input);
+                });
+                input.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    showProviderModelSuggestionMenu(input);
+                });
+                input.addEventListener('keydown', handleProviderModelSuggestionInputKeydown);
+            });
         }
 
         function renderSettingsProviderDetails() {
             var provider = getSelectedSettingsProvider();
             if (!provider || !appSettings) return;
+            closeProviderModelSuggestionMenus();
             var cfg = getProviderSettings(provider.type);
             var definition = getProviderSettingsDefinition(provider.type);
             var hasProviderSettings = !!definition;
@@ -2969,6 +3125,7 @@
             if (settingsProviderExtraFields) {
                 settingsProviderExtraFields.style.display = showProviderFields ? '' : 'none';
                 settingsProviderExtraFields.innerHTML = showProviderFields ? definition.buildFields(cfg) : '';
+                if (showProviderFields) bindProviderModelSuggestionInputs();
             }
             if (definition && definition.showModelSelect) fetchSettingsModelConfig(provider.type);
         }
@@ -3004,19 +3161,19 @@
 
         function buildClaudeCodeCompatFields(cfg) {
             return '<label class="settings-row"><span><strong>Anthropic Base URL</strong><small>兼容 Anthropic API 的服务地址</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-anthropic-base-url" type="url" value="' + escapeHtml(cfg.anthropicBaseUrl || '') + '" spellcheck="false"></label>' +
+                '<input class="settings-inline-input" id="settings-provider-anthropic-base-url" type="url" value="' + escapeAttr(cfg.anthropicBaseUrl || '') + '" spellcheck="false"></label>' +
                 '<label class="settings-row"><span><strong>API Key</strong><small>访问兼容服务所需的密钥</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-api-key" type="password" value="' + escapeHtml(cfg.apiKey || '') + '"></label>' +
+                '<input class="settings-inline-input" id="settings-provider-api-key" type="password" value="' + escapeAttr(cfg.apiKey || '') + '"></label>' +
                 '<label class="settings-row"><span><strong>Auto 模型</strong><small>用于 Auto 模型</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-anthropic-auto-model" value="' + escapeHtml(cfg.anthropicAutoModel || cfg.defaultModel || '') + '" spellcheck="false"></label>' +
+                buildProviderModelInput('settings-provider-anthropic-auto-model', cfg.anthropicAutoModel || cfg.defaultModel || '') + '</label>' +
                 '<label class="settings-row"><span><strong>Opus 模型</strong><small>用于 Opus 模型</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-anthropic-opus-model" value="' + escapeHtml(cfg.anthropicOpusModel || '') + '" spellcheck="false"></label>' +
+                buildProviderModelInput('settings-provider-anthropic-opus-model', cfg.anthropicOpusModel || '') + '</label>' +
                 '<label class="settings-row"><span><strong>Sonnet 模型</strong><small>用于 Sonnet 模型</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-anthropic-sonnet-model" value="' + escapeHtml(cfg.anthropicSonnetModel || '') + '" spellcheck="false"></label>' +
+                buildProviderModelInput('settings-provider-anthropic-sonnet-model', cfg.anthropicSonnetModel || '') + '</label>' +
                 '<label class="settings-row"><span><strong>Haiku / Fast 模型</strong><small>用于轻量或快速模型</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-anthropic-haiku-model" value="' + escapeHtml(cfg.anthropicHaikuModel || '') + '" spellcheck="false"></label>' +
+                buildProviderModelInput('settings-provider-anthropic-haiku-model', cfg.anthropicHaikuModel || '') + '</label>' +
                 '<label class="settings-row"><span><strong>Subagent 模型</strong><small>用于子任务模型</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-subagent-model" value="' + escapeHtml(cfg.claudeCodeSubagentModel || '') + '" spellcheck="false"></label>';
+                buildProviderModelInput('settings-provider-subagent-model', cfg.claudeCodeSubagentModel || '') + '</label>';
         }
 
         function collectProviderSettings(providerType) {
@@ -3979,6 +4136,9 @@
             if (settingsProviderModelComboboxController && !settingsProviderModelComboboxController.contains(e.target)) {
                 settingsProviderModelComboboxController.setOpen(false);
             }
+            if (!e.target.closest || !e.target.closest('.provider-model-input-control')) {
+                closeProviderModelSuggestionMenus();
+            }
         });
 
         document.addEventListener('keydown', function (e) {
@@ -3991,6 +4151,10 @@
                 if (settingsProviderModelComboboxController && settingsProviderModelComboboxController.isOpen()) {
                     settingsProviderModelComboboxController.setOpen(false);
                     settingsProviderModelComboboxController.focusTrigger();
+                    return;
+                }
+                if (document.querySelector('.provider-model-input-control.open')) {
+                    closeProviderModelSuggestionMenus();
                     return;
                 }
                 if (settingsThemeCombobox && settingsThemeCombobox.classList.contains('open')) {
