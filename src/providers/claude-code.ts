@@ -22,6 +22,7 @@ import {
 } from "./codex.js";
 import {
   createFileChangeEvent,
+  createTaskEvent,
   createToolEndEvent,
   createToolProgressEvent,
   createToolStartEvent,
@@ -39,15 +40,36 @@ const WORKDIR_SAFETY_PROMPT = [
   "- 在进行任何文件操作之前，先使用 `pwd` 确认当前处于正确目录",
   "- 未经用户明确确认，绝不要使用 `git reset --hard` 或 `git clean -fd`",
   "- 对关键操作使用绝对路径",
+  "## 执行效率规则",
+  "- 需要探索多个独立文件、目录或模块时，优先并行使用只读搜索/读取工具或 Agent/Task 子任务",
+  "- 子任务只负责独立探索和分析，最终结论由主任务整合",
 ].join("\n");
 
-const READ_ONLY_TOOLS = ["Read", "Grep", "Glob", "LS"];
-const WORKSPACE_WRITE_TOOLS = [
-  "Bash",
+const DISCOVERY_TOOLS = [
   "Read",
   "Grep",
   "Glob",
   "LS",
+  "LSP",
+  "ToolSearch",
+  "TodoWrite",
+  "Task",
+  "Agent",
+  "TaskCreate",
+  "TaskGet",
+  "TaskUpdate",
+  "TaskList",
+  "TaskStop",
+  "TaskOutput",
+  "SendMessage",
+  "Sleep",
+  "WebSearch",
+  "WebFetch",
+];
+const READ_ONLY_TOOLS = DISCOVERY_TOOLS;
+const WORKSPACE_WRITE_TOOLS = [
+  ...DISCOVERY_TOOLS,
+  "Bash",
   "Edit",
   "MultiEdit",
   "Write",
@@ -163,6 +185,18 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function mergeStreamedAndFinalResponse(streamed: string, finalResult: string): string {
+  const streamedText = streamed.trim();
+  const finalText = finalResult.trim();
+  if (!streamedText) return finalText;
+  if (!finalText) return streamedText;
+  if (streamedText === finalText) return finalText;
+  if (streamedText.endsWith(finalText)) return streamedText;
+  if (finalText.endsWith(streamedText) || finalText.includes(streamedText)) return finalText;
+  if (streamedText.includes(finalText)) return streamedText;
+  return `${streamedText}\n\n${finalText}`;
 }
 
 export class ClaudeCodeProvider implements IProvider {
@@ -286,6 +320,7 @@ export class ClaudeCodeProvider implements IProvider {
 
     try {
       let resultMessage: SDKResultMessage | null = null;
+      let streamedResponseText = "";
       let contextUsageBreakdown: SDKControlGetContextUsageResponse | null = null;
       let contextUsageBreakdownPromise: Promise<SDKControlGetContextUsageResponse | null> | null =
         null;
@@ -371,8 +406,10 @@ export class ClaudeCodeProvider implements IProvider {
           permissionMode,
           allowDangerouslySkipPermissions: permissionMode === "bypassPermissions",
           allowedTools: buildAllowedTools(sandbox),
+          tools: { type: "preset", preset: "claude_code" },
           sandbox: buildSandboxOptions(sandbox, workdir),
           includePartialMessages: !!onEvent,
+          agentProgressSummaries: !!onEvent,
           hooks,
           env,
           settings: flagSettings,
@@ -397,6 +434,7 @@ export class ClaudeCodeProvider implements IProvider {
         if (onEvent) {
           const delta = extractAssistantTextDelta(message);
           if (delta) {
+            streamedResponseText += delta;
             await onEvent({ type: "answer_delta", text: delta });
           }
 
@@ -408,6 +446,11 @@ export class ClaudeCodeProvider implements IProvider {
           const progress = createToolProgressEvent(message);
           if (progress) {
             await onEvent(progress);
+          }
+
+          const task = createTaskEvent(message);
+          if (task) {
+            await onEvent(task);
           }
         }
 
@@ -450,7 +493,7 @@ export class ClaudeCodeProvider implements IProvider {
         throw new ProviderProcessError(1, output);
       }
 
-      const responseText = resultMessage.result.trim();
+      const responseText = mergeStreamedAndFinalResponse(streamedResponseText, resultMessage.result);
       if (!responseText) {
         logger.error("provider.exec.empty_response", {
           provider: this.type,

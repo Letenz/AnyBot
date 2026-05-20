@@ -5,6 +5,10 @@ import type {
   HookInput,
   SDKMessage,
   SDKPartialAssistantMessage,
+  SDKTaskNotificationMessage,
+  SDKTaskProgressMessage,
+  SDKTaskStartedMessage,
+  SDKTaskUpdatedMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderContextUsage } from "./types.js";
 
@@ -27,6 +31,44 @@ export type ClaudeAgentStreamEvent =
     }
   | { type: "answer_delta"; text: string }
   | { type: "thinking_delta"; text: string }
+  | {
+      type: "task_start";
+      task: {
+        id: string;
+        toolUseId?: string;
+        description: string;
+        taskType?: string;
+        workflowName?: string;
+        prompt?: string;
+        startedAt: number;
+        status: "running";
+      };
+    }
+  | {
+      type: "task_progress";
+      taskId: string;
+      toolUseId?: string;
+      description?: string;
+      summary?: string;
+      lastToolName?: string;
+      status?: "pending" | "running" | "completed" | "failed" | "killed";
+      isBackgrounded?: boolean;
+      error?: string;
+      durationMs?: number;
+      totalTokens?: number;
+      toolUses?: number;
+    }
+  | {
+      type: "task_end";
+      taskId: string;
+      toolUseId?: string;
+      status: "completed" | "failed" | "stopped";
+      outputFile?: string;
+      summary?: string;
+      durationMs?: number;
+      totalTokens?: number;
+      toolUses?: number;
+    }
   | {
       type: "tool_start";
       tool: {
@@ -187,6 +229,74 @@ export function createToolProgressEvent(message: SDKMessage): ClaudeAgentStreamE
   };
 }
 
+export function createTaskEvent(message: SDKMessage): ClaudeAgentStreamEvent | null {
+  if (message.type !== "system") return null;
+  const subtype = (message as { subtype?: string }).subtype;
+
+  if (subtype === "task_started") {
+    const task = message as SDKTaskStartedMessage;
+    if (task.skip_transcript) return null;
+    return {
+      type: "task_start",
+      task: {
+        id: task.task_id,
+        toolUseId: task.tool_use_id,
+        description: sanitizeAgentText(task.description),
+        taskType: task.task_type,
+        workflowName: task.workflow_name,
+        prompt: task.prompt ? sanitizeAgentText(task.prompt) : undefined,
+        startedAt: Date.now(),
+        status: "running",
+      },
+    };
+  }
+
+  if (subtype === "task_progress") {
+    const task = message as SDKTaskProgressMessage;
+    return {
+      type: "task_progress",
+      taskId: task.task_id,
+      toolUseId: task.tool_use_id,
+      description: sanitizeAgentText(task.description),
+      summary: task.summary ? sanitizeAgentText(task.summary) : undefined,
+      lastToolName: task.last_tool_name,
+      durationMs: task.usage?.duration_ms,
+      totalTokens: task.usage?.total_tokens,
+      toolUses: task.usage?.tool_uses,
+    };
+  }
+
+  if (subtype === "task_updated") {
+    const task = message as SDKTaskUpdatedMessage;
+    return {
+      type: "task_progress",
+      taskId: task.task_id,
+      status: task.patch.status,
+      description: task.patch.description ? sanitizeAgentText(task.patch.description) : undefined,
+      isBackgrounded: task.patch.is_backgrounded,
+      error: task.patch.error ? sanitizeAgentText(task.patch.error) : undefined,
+    };
+  }
+
+  if (subtype === "task_notification") {
+    const task = message as SDKTaskNotificationMessage;
+    if (task.skip_transcript) return null;
+    return {
+      type: "task_end",
+      taskId: task.task_id,
+      toolUseId: task.tool_use_id,
+      status: task.status,
+      outputFile: task.output_file,
+      summary: sanitizeAgentText(task.summary),
+      durationMs: task.usage?.duration_ms,
+      totalTokens: task.usage?.total_tokens,
+      toolUses: task.usage?.tool_uses,
+    };
+  }
+
+  return null;
+}
+
 function buildToolTitle(toolName: string, summary: string): string {
   return summary ? `${toolName} · ${summary}` : toolName;
 }
@@ -210,6 +320,7 @@ function summarizeToolInput(toolName: string, input: unknown): string {
     case "Bash":
       return truncateOneLine(getString(obj, "command") || "", 96);
     case "Agent":
+    case "Task":
       return getString(obj, "description") || getString(obj, "subagent_type") || "";
     default:
       return readPath || getString(obj, "command") || getString(obj, "pattern") || "";

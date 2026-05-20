@@ -72,6 +72,31 @@ function compactAgentEvent(event: ClaudeAgentStreamEvent): ClaudeAgentStreamEven
       })),
     };
   }
+  if (event.type === "task_start") {
+    return {
+      ...event,
+      task: {
+        ...event.task,
+        description: truncateForHistory(event.task.description) || "",
+        prompt: truncateForHistory(event.task.prompt),
+      },
+    };
+  }
+  if (event.type === "task_progress") {
+    return {
+      ...event,
+      description: truncateForHistory(event.description),
+      summary: truncateForHistory(event.summary),
+      error: truncateForHistory(event.error),
+    };
+  }
+  if (event.type === "task_end") {
+    return {
+      ...event,
+      summary: truncateForHistory(event.summary),
+      outputFile: truncateForHistory(event.outputFile),
+    };
+  }
   if (event.type === "file_change") {
     return { ...event, diff: undefined };
   }

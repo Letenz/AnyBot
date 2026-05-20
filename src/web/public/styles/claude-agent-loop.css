@@ -161,6 +161,66 @@
     color: #f87171;
 }
 
+.claude-task-item {
+    border-left: 2px solid var(--border);
+    padding-left: 10px;
+}
+
+.claude-task-summary {
+    list-style: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.claude-task-summary::-webkit-details-marker {
+    display: none;
+}
+
+.claude-task-summary-text {
+    color: inherit;
+}
+
+.claude-task-chevron {
+    color: var(--text-muted);
+    font-size: 14px;
+    transform: translateY(1px);
+    transition: transform 0.16s ease;
+}
+
+.claude-task-item[open] .claude-task-chevron {
+    transform: rotate(90deg) translateY(1px);
+}
+
+.claude-task-steps {
+    margin-top: 7px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.claude-task-step {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.claude-task-item.running,
+.claude-task-item.pending {
+    color: var(--text-muted);
+}
+
+.claude-task-item.completed {
+    color: #86efac;
+}
+
+.claude-task-item.stopped,
+.claude-task-item.killed {
+    color: var(--text-muted);
+}
+
 .claude-activity-item.shell {
     display: block;
 }
