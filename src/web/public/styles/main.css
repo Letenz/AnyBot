@@ -1393,6 +1393,12 @@
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
 
+        .settings-inline-input[readonly] {
+            cursor: default;
+            color: var(--text-muted);
+            background: rgba(148, 163, 184, 0.08);
+        }
+
         #settings-provider-model-select {
             width: 100%;
             min-width: 0;

@@ -255,16 +255,37 @@ function isFolderPickerCanceled(error: unknown): boolean {
   return candidate.code === 2 || text.includes("(-128)") || text.includes("用户已取消") || text.includes("User canceled") || text.includes("User cancelled");
 }
 
-async function pickProjectFolder(): Promise<string | null> {
+function resolveFolderPickerDefaultPath(defaultPath?: string): string | null {
+  if (!defaultPath) return null;
+  try {
+    const resolved = fs.realpathSync(path.resolve(defaultPath));
+    return fs.statSync(resolved).isDirectory() ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+function quotePowerShellString(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+function quoteAppleScriptString(value: string): string {
+  return JSON.stringify(value);
+}
+
+async function pickProjectFolder(opts: { defaultPath?: string; prompt?: string } = {}): Promise<string | null> {
   let stdout = "";
+  const prompt = opts.prompt || "选择项目文件夹";
+  const defaultPath = resolveFolderPickerDefaultPath(opts.defaultPath);
 
   if (process.platform === "win32") {
     const script = [
       "Add-Type -AssemblyName System.Windows.Forms",
       "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
       "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog",
-      "$dialog.Description = '选择项目文件夹'",
+      `$dialog.Description = ${quotePowerShellString(prompt)}`,
       "$dialog.ShowNewFolderButton = $true",
+      ...(defaultPath ? [`$dialog.SelectedPath = ${quotePowerShellString(defaultPath)}`] : []),
       "if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {",
       "  [Console]::Out.WriteLine($dialog.SelectedPath)",
       "  exit 0",
@@ -295,9 +316,12 @@ async function pickProjectFolder(): Promise<string | null> {
   }
 
   try {
+    const script = defaultPath
+      ? `POSIX path of (choose folder with prompt ${quoteAppleScriptString(prompt)} default location POSIX file ${quoteAppleScriptString(defaultPath)})`
+      : `POSIX path of (choose folder with prompt ${quoteAppleScriptString(prompt)})`;
     const result = await execFile("osascript", [
       "-e",
-      'POSIX path of (choose folder with prompt "选择项目文件夹")',
+      script,
     ]);
     stdout = result.stdout;
   } catch (error) {
@@ -400,7 +424,7 @@ export function chatRouter(): Router {
 
   router.post("/projects/pick", async (_req: Request, res: Response) => {
     try {
-      const projectPath = await pickProjectFolder();
+      const projectPath = await pickProjectFolder({ defaultPath: getWorkdir() });
       if (!projectPath) {
         res.json({ canceled: true });
         return;
@@ -573,7 +597,10 @@ export function chatRouter(): Router {
 
   router.post("/app-settings/default-workdir/pick", async (_req: Request, res: Response) => {
     try {
-      const selected = await pickProjectFolder();
+      const selected = await pickProjectFolder({
+        defaultPath: getWorkdir(),
+        prompt: "变更默认工作目录",
+      });
       if (!selected) {
         res.json({ canceled: true });
         return;

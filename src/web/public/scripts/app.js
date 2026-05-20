@@ -2809,16 +2809,6 @@
             showChatView();
         }
 
-        var workdirSaveTimer = null;
-
-        function scheduleDefaultWorkdirSave() {
-            if (!settingsDefaultWorkdir) return;
-            clearTimeout(workdirSaveTimer);
-            workdirSaveTimer = setTimeout(function () {
-                persistDefaultWorkdir();
-            }, 600);
-        }
-
         async function persistDefaultWorkdir() {
             if (!settingsDefaultWorkdir) return false;
             return persistAppSettingsPatch({
@@ -2966,8 +2956,12 @@
             });
         }
         if (settingsDefaultWorkdir) {
-            settingsDefaultWorkdir.addEventListener('input', scheduleDefaultWorkdirSave);
-            settingsDefaultWorkdir.addEventListener('change', persistDefaultWorkdir);
+            settingsDefaultWorkdir.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (settingsWorkdirPickBtn) settingsWorkdirPickBtn.click();
+                }
+            });
         }
         if (settingsProjectsEntryBtn) {
             settingsProjectsEntryBtn.addEventListener('click', function () {
