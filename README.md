@@ -405,6 +405,7 @@ AnyBot 不再读取 `.env` 文件。Provider、模型和权限等常用设置会
 | `LOG_LEVEL` | `info` | 日志级别：`debug` / `info` / `warn` / `error` |
 | `LOG_INCLUDE_CONTENT` | `false` | 日志中包含消息内容（调试用） |
 | `LOG_INCLUDE_PROMPT` | `false` | 日志中包含完整 prompt（调试用） |
+| `LOG_RETENTION_DAYS` | `3` | 日志保留天数，超过后自动删除 |
 
 ### Codex CLI 配置
 
@@ -486,7 +487,7 @@ curl -X POST http://localhost:19981/api/send \
 - 图片消息先下载到临时目录，通过 Provider 传入
 - 回复中的本机图片路径（`![alt](/path.png)` 或纯路径）会自动上传
 - 回复中的 `FILE: /path/to/file.ext` 会作为文件发送
-- 日志为单行 JSON，写入 `.run/` 目录，按 10 分钟切分
+- 日志为单行 JSON，写入 `.run/` 目录，按 10 分钟切分，默认保留 3 天
 
 ---
 

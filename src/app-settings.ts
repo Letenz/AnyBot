@@ -46,6 +46,7 @@ export interface AppSettings {
     logLevel: AppLogLevel;
     logIncludeContent: boolean;
     logIncludePrompt: boolean;
+    logRetentionDays: number;
   };
 }
 
@@ -68,6 +69,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     logLevel: "info",
     logIncludeContent: false,
     logIncludePrompt: false,
+    logRetentionDays: 3,
   },
 };
 
@@ -88,6 +90,19 @@ function isLogLevel(value: unknown): value is AppLogLevel {
 
 function isTheme(value: unknown): value is AppTheme {
   return value === "light" || value === "dark" || value === "system";
+}
+
+function normalizeLogRetentionDays(value: unknown): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+  if (Number.isFinite(parsed) && parsed >= 1) {
+    return Math.floor(parsed);
+  }
+  return DEFAULT_SETTINGS.privacy.logRetentionDays;
 }
 
 function normalizeProviderSettings(value: unknown): ProviderRuntimeSettings {
@@ -166,6 +181,7 @@ function mergeSettings(value: unknown): AppSettings {
         typeof privacy.logIncludePrompt === "boolean"
           ? privacy.logIncludePrompt
           : DEFAULT_SETTINGS.privacy.logIncludePrompt,
+      logRetentionDays: normalizeLogRetentionDays(privacy.logRetentionDays),
     },
   };
 }

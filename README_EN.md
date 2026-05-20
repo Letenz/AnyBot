@@ -405,6 +405,7 @@ AnyBot no longer reads `.env` files. Common settings such as provider, model, an
 | `LOG_LEVEL` | `info` | Log level: `debug` / `info` / `warn` / `error` |
 | `LOG_INCLUDE_CONTENT` | `false` | Include message content in logs (for debugging) |
 | `LOG_INCLUDE_PROMPT` | `false` | Include full prompt in logs (for debugging) |
+| `LOG_RETENTION_DAYS` | `3` | Log retention in days; older logs are deleted automatically |
 
 ### Codex CLI
 

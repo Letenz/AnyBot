@@ -95,6 +95,7 @@
         const settingsLogLevel = document.getElementById('settings-log-level');
         const settingsLogContent = document.getElementById('settings-log-content');
         const settingsLogPrompt = document.getElementById('settings-log-prompt');
+        const settingsLogRetentionDays = document.getElementById('settings-log-retention-days');
         const settingsOpenLogsBtn = document.getElementById('settings-open-logs-btn');
         const settingsClearLogsBtn = document.getElementById('settings-clear-logs-btn');
         const settingsOpenDataBtn = document.getElementById('settings-open-data-btn');
@@ -2045,6 +2046,7 @@
                     logLevel: 'info',
                     logIncludeContent: false,
                     logIncludePrompt: false,
+                    logRetentionDays: 3,
                 },
             };
         }
@@ -2121,8 +2123,24 @@
                     (appSettingsPayload && appSettingsPayload.effective && appSettingsPayload.effective.workdir) ||
                     '';
             }
+            if (settingsLogRetentionDays) {
+                settingsLogRetentionDays.value = String(normalizeLogRetentionDays(appSettings.privacy.logRetentionDays));
+            }
             renderNetworkSettings();
             renderSettingsProviderDetails();
+        }
+
+        function normalizeLogRetentionDays(value) {
+            var parsed = Number(value);
+            if (!Number.isFinite(parsed) || parsed < 1) return 3;
+            return Math.floor(parsed);
+        }
+
+        async function persistLogRetentionDays() {
+            if (!settingsLogRetentionDays) return;
+            var days = normalizeLogRetentionDays(settingsLogRetentionDays.value);
+            settingsLogRetentionDays.value = String(days);
+            await persistAppSettingsPatch({ privacy: { logRetentionDays: days } }, '已保存日志保留时间');
         }
 
         function setSettingsTab(tab) {
@@ -3141,6 +3159,15 @@
                 if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     if (settingsWorkdirPickBtn) settingsWorkdirPickBtn.click();
+                }
+            });
+        }
+        if (settingsLogRetentionDays) {
+            settingsLogRetentionDays.addEventListener('change', persistLogRetentionDays);
+            settingsLogRetentionDays.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    settingsLogRetentionDays.blur();
                 }
             });
         }

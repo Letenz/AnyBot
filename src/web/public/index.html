@@ -348,6 +348,13 @@
                         <section class="settings-tab-panel" data-settings-panel="privacy" role="tabpanel">
                             <div class="settings-section-card">
                                 <div class="settings-section-title">日志</div>
+                                <div class="settings-row">
+                                    <span>
+                                        <strong>日志保留时间</strong>
+                                        <small>按天保留运行日志，超过保留时间后自动删除</small>
+                                    </span>
+                                    <input class="settings-inline-input short" id="settings-log-retention-days" type="number" min="1" step="1" inputmode="numeric" aria-label="日志保留天数">
+                                </div>
                                 <div class="settings-button-row">
                                     <button class="settings-secondary-btn compact" id="settings-open-logs-btn" type="button">打开日志目录</button>
                                     <button class="settings-danger-btn compact" id="settings-clear-logs-btn" type="button">清空日志</button>

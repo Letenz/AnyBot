@@ -4,7 +4,7 @@ type RawLogString = {
   value: string;
 };
 
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { readAppSettings } from "./app-settings.js";
 
@@ -18,6 +18,10 @@ const levelWeight: Record<LogLevel, number> = {
 const logToStdout = resolveLogToStdout(process.env.LOG_TO_STDOUT);
 const logDir = path.resolve(process.env.LOG_DIR || ".run");
 const logBaseName = process.env.LOG_BASENAME || "bot.log";
+const retentionSweepIntervalMs = 60 * 60 * 1000;
+const dayMs = 24 * 60 * 60 * 1000;
+
+let lastRetentionSweepMs = 0;
 
 function parseLogLevel(value?: string): LogLevel {
   switch ((value || "").trim().toLowerCase()) {
@@ -41,6 +45,15 @@ function parseBooleanFlag(value?: string): boolean {
     default:
       return false;
   }
+}
+
+function parsePositiveInteger(value?: string): number | null {
+  if (value === undefined) return null;
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed >= 1) {
+    return Math.floor(parsed);
+  }
+  return null;
 }
 
 function resolveLogToStdout(value?: string): boolean {
@@ -126,6 +139,10 @@ function getConfiguredLevel(): LogLevel {
   return parseLogLevel(process.env.LOG_LEVEL || readAppSettings().privacy.logLevel);
 }
 
+function getConfiguredRetentionDays(): number {
+  return parsePositiveInteger(process.env.LOG_RETENTION_DAYS) ?? readAppSettings().privacy.logRetentionDays;
+}
+
 /** 生成带本地时区偏移的 ISO 时间字符串，例如 2026-03-15T19:51:25.038+08:00 */
 function formatLocalISOString(date: Date): string {
   const offset = -date.getTimezoneOffset(); // 分钟，东区为正
@@ -175,8 +192,62 @@ function emit(level: LogLevel, message: string, context?: Record<string, unknown
 
 function writeLogFile(line: string): void {
   mkdirSync(logDir, { recursive: true });
-  const filePath = path.join(logDir, buildLogFileName(new Date()));
+  const now = new Date();
+  sweepExpiredLogs(now);
+  const filePath = path.join(logDir, buildLogFileName(now));
   appendFileSync(filePath, `${line}\n`, "utf8");
+}
+
+function sweepExpiredLogs(now: Date): void {
+  const nowMs = now.getTime();
+  if (nowMs - lastRetentionSweepMs < retentionSweepIntervalMs) {
+    return;
+  }
+  lastRetentionSweepMs = nowMs;
+
+  const cutoffMs = nowMs - getConfiguredRetentionDays() * dayMs;
+  try {
+    for (const entry of readdirSync(logDir, { withFileTypes: true })) {
+      if (!entry.isFile()) {
+        continue;
+      }
+      const logTimeMs = parseLogFileTimeMs(entry.name);
+      if (logTimeMs !== null && logTimeMs < cutoffMs) {
+        const filePath = path.join(logDir, entry.name);
+        rmSync(filePath, { force: true });
+      }
+    }
+  } catch {
+    // Log cleanup must never prevent writing the current log line.
+  }
+}
+
+function parseLogFileTimeMs(fileName: string): number | null {
+  const match = fileName.match(new RegExp(`^${escapeRegExp(logBaseName)}\\.(\\d{4})(\\d{2})(\\d{2})-(\\d{2})(\\d{2})$`));
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute] = match;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+  );
+  if (
+    date.getFullYear() !== Number(year) ||
+    date.getMonth() !== Number(month) - 1 ||
+    date.getDate() !== Number(day) ||
+    date.getHours() !== Number(hour) ||
+    date.getMinutes() !== Number(minute)
+  ) {
+    return null;
+  }
+  return date.getTime();
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildLogFileName(date: Date): string {
