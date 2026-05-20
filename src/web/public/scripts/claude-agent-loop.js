@@ -19,7 +19,18 @@
     function renderMarkdown(text) {
         if (!text) return '';
         try {
-            return typeof marked !== 'undefined' ? marked.parse(text) : escapeHtml(text);
+            if (window.AnyBotMarkdown && typeof window.AnyBotMarkdown.render === 'function') {
+                return window.AnyBotMarkdown.render(text);
+            }
+            var html = typeof marked !== 'undefined' ? marked.parse(text) : escapeHtml(text);
+            if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+                return window.DOMPurify.sanitize(html, {
+                    ADD_ATTR: ['target'],
+                    FORBID_TAGS: ['style'],
+                    FORBID_ATTR: ['style'],
+                });
+            }
+            return html;
         } catch (_) {
             return escapeHtml(text);
         }

@@ -591,12 +591,54 @@
             }
         }
 
+        function isSafeLinkHref(href) {
+            var value = String(href || '').trim();
+            if (!value || /[\u0000-\u001f\u007f]/.test(value)) return false;
+            if (/^(https?:|mailto:|tel:)/i.test(value)) return true;
+            if (/^(\/(?!\/)|#|\?|\.\.?\/)/.test(value)) return true;
+            return !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value);
+        }
+
+        function isSafeImageHref(href) {
+            var value = String(href || '').trim();
+            if (!value || /[\u0000-\u001f\u007f]/.test(value)) return false;
+            if (/^https?:/i.test(value)) return true;
+            if (/^\/(?!\/)/.test(value)) return true;
+            if (/^\.\.?\//.test(value)) return true;
+            return !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(value);
+        }
+
+        function sanitizeRenderedHtml(html) {
+            if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+                return window.DOMPurify.sanitize(html, {
+                    ADD_ATTR: ['target'],
+                    FORBID_TAGS: ['style'],
+                    FORBID_ATTR: ['style'],
+                });
+            }
+            return html;
+        }
+
+        function renderMarkdown(text) {
+            if (!text) return '';
+            try {
+                return sanitizeRenderedHtml(typeof marked !== 'undefined' ? marked.parse(text) : escapeHtml(String(text)));
+            } catch (_) {
+                return escapeHtml(String(text));
+            }
+        }
+
         if (typeof marked !== 'undefined') {
             var markedRenderer = new marked.Renderer();
+            markedRenderer.html = function (obj) {
+                var html = (typeof obj === 'string') ? obj : (obj.raw || obj.text || '');
+                return escapeHtml(String(html || ''));
+            };
+
             markedRenderer.code = function (obj) {
                 var code = (typeof obj === 'string') ? obj : (obj.text || '');
                 var lang = (typeof obj === 'string') ? '' : (obj.lang || '');
-                var headerHtml = '<div class="code-header"><span class="code-lang">' + escapeHtml(lang || 'text') + '</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>';
+                var headerHtml = '<div class="code-header"><span class="code-lang">' + escapeHtml(lang || 'text') + '</span><button class="code-copy" type="button">复制</button></div>';
                 if (lang && typeof hljs !== 'undefined' && hljs.getLanguage(lang)) {
                     try {
                         var highlighted = hljs.highlight(code, {language: lang}).value;
@@ -609,23 +651,24 @@
 
             // 自定义图片渲染：将本地绝对路径改写为通过后端代理访问，限制尺寸并支持点击放大
             markedRenderer.image = function (obj) {
-                var href = (typeof obj === 'string') ? obj : (obj.href || '');
+                var href = String((typeof obj === 'string') ? obj : (obj.href || '')).trim();
                 var title = (typeof obj === 'string') ? '' : (obj.title || '');
                 var alt = (typeof obj === 'string') ? '' : (obj.text || '');
                 // 本地绝对路径：以 / 开头且不是 Web 路径
                 if (href.startsWith('/') && !href.startsWith('/api')) {
                     href = '/api/local-file?path=' + encodeURIComponent(href);
                 }
-                return '<img src="' + href + '" alt="' + escapeHtml(alt) + '"'
-                    + (title ? ' title="' + escapeHtml(title) + '"' : '')
-                    + ' class="chat-image" onclick="openImageModal(this.src)" />';
+                if (!isSafeImageHref(href)) return escapeHtml(alt || title || '');
+                return '<img src="' + escapeAttr(href) + '" alt="' + escapeAttr(alt) + '"'
+                    + (title ? ' title="' + escapeAttr(title) + '"' : '')
+                    + ' class="chat-image" />';
             };
 
             markedRenderer.link = function (obj) {
                 var href = normalizeLinkHref((typeof obj === 'string') ? obj : (obj.href || ''));
                 var title = (typeof obj === 'string') ? '' : (obj.title || '');
                 var text = (typeof obj === 'string') ? escapeHtml(href) : (obj.text || escapeHtml(href));
-                if (!href || /^\s*javascript:/i.test(href)) return text;
+                if (!href || !isSafeLinkHref(href)) return text;
                 if (isLocalFileLinkHref(href)) return text;
                 var externalAttrs = isExternalLinkHref(href) ? ' target="_blank" rel="noopener noreferrer"' : '';
                 return '<a href="' + escapeAttr(href) + '"'
@@ -639,6 +682,21 @@
                 breaks: true,
             });
         }
+
+        window.AnyBotMarkdown = { render: renderMarkdown };
+
+        messagesEl.addEventListener('click', function (e) {
+            var copyButton = e.target && e.target.closest ? e.target.closest('.code-copy') : null;
+            if (copyButton && messagesEl.contains(copyButton)) {
+                copyCode(copyButton);
+                return;
+            }
+
+            var target = e.target && e.target.closest ? e.target.closest('.chat-image') : null;
+            if (target && messagesEl.contains(target)) {
+                openImageModal(target.src);
+            }
+        });
 
         function scrollBottom() {
             if (isBatchRenderingMessages) return;
@@ -669,7 +727,7 @@
                     : fullText.slice(0, LARGE_MESSAGE_PREVIEW_CHARS) + '\n\n...[内容较长，已折叠]';
             }
             try {
-                content.innerHTML = marked.parse(renderText);
+                content.innerHTML = renderMarkdown(renderText);
             } catch (e) {
                 content.textContent = renderText;
             }
@@ -693,7 +751,7 @@
                     }
                 }
                 try {
-                    content.innerHTML = marked.parse(nextText);
+                    content.innerHTML = renderMarkdown(nextText);
                 } catch (e) {
                     content.textContent = nextText;
                 }
