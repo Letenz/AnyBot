@@ -4,7 +4,7 @@
 
 Turn AI CLI tools into remotely accessible AI assistants — chat through the built-in **Web UI** in your browser, or message the AI running on your machine anytime via **Feishu Bot** / **QQ Bot** / **Telegram Bot** / **personal Weixin** on mobile or desktop.
 
-Currently supports [OpenAI Codex CLI](https://github.com/openai/codex), [Google Gemini CLI](https://github.com/google-gemini/gemini-cli), [Cursor CLI](https://docs.cursor.com/cli), [Qoder CLI](https://docs.qoder.com), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as Providers.
+Currently supports [OpenAI Codex CLI](https://github.com/openai/codex), [Cursor CLI](https://docs.cursor.com/cli), and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as Providers.
 
 Supports **macOS**, **Linux**, and **Windows**.
 
@@ -12,7 +12,7 @@ Supports **macOS**, **Linux**, and **Windows**.
 
 ## Features
 
-- **Multi-Provider Architecture** — Pluggable AI backends; currently supports Codex CLI,Claude Code， Gemini CLI, Cursor CLI, Qoder CLI
+- **Multi-Provider Architecture** — Pluggable AI backends; currently supports Codex CLI, Claude Code, and Cursor CLI
 - **Web UI** — Built-in local chat interface with Markdown rendering, code highlighting, and session management
 - **Attachment Support** — Send files via the 📎 button, paste images, or drag-and-drop files in the Web UI (images + any file type, 50MB limit)
 - **Multi-Platform Integration** — Feishu (long connection), QQ Bot (WebSocket), Telegram, and personal Weixin simultaneously — works on mobile too
@@ -63,9 +63,7 @@ Plus at least one configured Provider:
 | Provider | Installation | Note |
 |----------|-------------|------|
 | [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | OpenAI's CLI tool |
-| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | See [official docs](https://github.com/google-gemini/gemini-cli) | Google's CLI tool |
 | [Cursor CLI](https://docs.cursor.com/cli) | Enable `agent` command in Cursor settings | Cursor editor's Agent CLI |
-| [Qoder CLI](https://docs.qoder.com) | See [official docs](https://docs.qoder.com) | Qoder's AI CLI tool |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Uses your locally logged-in `claude` command; the SDK is included as a project dependency | Anthropic's CLI tool |
 
 <details>
@@ -146,12 +144,10 @@ AnyBot uses a pluggable Provider architecture where each AI CLI tool maps to a P
 | Provider | Status | CLI Tool | Note |
 |----------|--------|----------|------|
 | `codex` | ✅ Available | [Codex CLI](https://github.com/openai/codex) | OpenAI's CLI, supports Sandbox mode |
-| `gemini-cli` | ✅ Available | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | Google's CLI, supports session continuity |
 | `cursor-cli` | ✅ Available | [Cursor CLI](https://docs.cursor.com/cli) | Cursor's Agent CLI, supports session continuity & Sandbox |
-| `qoder-cli` | ✅ Available | [Qoder CLI](https://docs.qoder.com) | Qoder's CLI, supports session continuity |
 | `claude-code` | ✅ Available | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic's CLI, supports session continuity and Sandbox mapping |
 
-Switch the default Provider via the `PROVIDER=codex`, `PROVIDER=gemini-cli`, `PROVIDER=cursor-cli`, `PROVIDER=qoder-cli`, or `PROVIDER=claude-code` environment variable, or switch anytime in the Web UI.
+Switch the default Provider via the `PROVIDER=codex`, `PROVIDER=cursor-cli`, or `PROVIDER=claude-code` environment variable, or switch anytime in the Web UI.
 
 ---
 
@@ -332,7 +328,7 @@ All channels (Feishu, QQ, Telegram, Weixin) support the following `/` commands:
 | `/help` | Show available commands |
 | `/new` | Start a new session, reset current context |
 | `/provider` | View available providers and current selection |
-| `/provider <name>` | Switch provider, e.g. `/provider gemini-cli` |
+| `/provider <name>` | Switch provider, e.g. `/provider cursor-cli` |
 | `/model` | View available models for the current provider |
 | `/model <name>` | Switch model, e.g. `/model gpt-5.5` |
 
@@ -354,10 +350,8 @@ After switching Providers, the skill list automatically switches to the correspo
 | Provider | Skill Directory |
 |----------|----------------|
 | `codex` | `$CODEX_HOME/skills/`, or `~/.codex/skills/` when unset |
-| `gemini-cli` | `~/.gemini/` |
 | `claude-code` | `$CLAUDE_CONFIG_DIR/skills/`, or `~/.claude/skills/` when unset |
 | `cursor-cli` | `./.cursor/rules/` |
-| `qoder-cli` | `~/.qoder/agents/` |
 
 ---
 
@@ -397,7 +391,7 @@ AnyBot supports centralized proxy settings in the Web UI for Provider requests, 
 
 - Enabling the proxy updates global `HTTP_PROXY` / `HTTPS_PROXY`
 - `localhost`, `127.0.0.1`, `::1`, `*.feishu.cn`, `*.larksuite.com`, and `*.qq.com` are bypassed by default
-- This is useful when you want Codex / Gemini / Cursor / Qoder / Telegram to use the same local proxy
+- This is useful when you want Codex / Cursor / Telegram to use the same local proxy
 
 ---
 
@@ -432,7 +426,7 @@ AnyBot no longer reads `.env` files. Common settings such as provider, model, an
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROVIDER` | `codex` | Provider to use: `codex`, `gemini-cli`, `cursor-cli`, `qoder-cli`, `claude-code` |
+| `PROVIDER` | `codex` | Provider to use: `codex`, `cursor-cli`, `claude-code` |
 | `WEB_PORT` | `19981` | Web UI port |
 | `LOG_LEVEL` | `info` | Log level: `debug` / `info` / `warn` / `error` |
 | `LOG_INCLUDE_CONTENT` | `false` | Include message content in logs (for debugging) |
@@ -448,14 +442,6 @@ AnyBot no longer reads `.env` files. Common settings such as provider, model, an
 | `CODEX_SYSTEM_PROMPT` | — | Custom system prompt appended to the built-in prompt |
 | `CODEX_WORKDIR` | Current directory | Working directory |
 
-### Gemini CLI
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_CLI_BIN` | `gemini` | Path to the Gemini CLI executable |
-| `GEMINI_CLI_MODEL` | — | Override the model used |
-| `GEMINI_CLI_APPROVAL_MODE` | `yolo` | Approval mode: `yolo` / `auto-edit` / `confirm` |
-
 ### Cursor CLI
 
 | Variable | Default | Description |
@@ -463,13 +449,6 @@ AnyBot no longer reads `.env` files. Common settings such as provider, model, an
 | `CURSOR_CLI_BIN` | `agent` | Path to the Cursor Agent CLI executable |
 | `CURSOR_CLI_WORKSPACE` | — | Workspace path (optional, defaults to working directory) |
 | `CURSOR_API_KEY` | — | API Key (optional, can also use a logged-in Cursor account) |
-
-### Qoder CLI
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `QODER_CLI_BIN` | `qodercli` | Path to the Qoder CLI executable |
-| `QODER_CLI_MAX_TURNS` | — | Maximum agent loop cycles (0 for unlimited) |
 
 ### Claude Code
 
@@ -556,9 +535,7 @@ AnyBot/
 │   │   ├── types.ts        # IProvider interface definition
 │   │   ├── index.ts        # ProviderManager (factory + registry)
 │   │   ├── codex.ts        # Codex CLI Provider implementation
-│   │   ├── gemini-cli.ts   # Gemini CLI Provider implementation
 │   │   ├── cursor-cli.ts   # Cursor CLI Provider implementation
-│   │   ├── qoder-cli.ts    # Qoder CLI Provider implementation
 │   │   └── claude-code.ts  # Claude Code Provider implementation
 │   ├── lark.ts             # Feishu API (messages, files, images)
 │   ├── logger.ts           # Structured logging
@@ -605,7 +582,7 @@ AnyBot's Provider architecture is extensible. Adding a new CLI tool takes just t
 2. **Register with the factory** — Add a new entry to `providerFactories` in `src/providers/index.ts`
 3. **Add environment variables** — Read the corresponding env vars in `getProviderConfig()` in `src/index.ts`
 
-Refer to `src/providers/codex.ts` and `src/providers/gemini-cli.ts` as implementation templates.
+Refer to `src/providers/codex.ts` and `src/providers/cursor-cli.ts` as implementation templates.
 
 ---
 

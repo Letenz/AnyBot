@@ -45,9 +45,6 @@ const PROVIDER_SKILL_DIRS: Record<string, () => SkillSource[]> = {
   "claude-code": () => {
     return [{ label: "Claude Code 技能", dir: path.join(getClaudeConfigDir(), "skills") }];
   },
-  "gemini-cli": () => {
-    return [{ label: "Gemini CLI 技能", dir: path.join(os.homedir(), ".agents", "skills") }];
-  },
   "cursor-cli": () => {
     const home = os.homedir();
     return [
@@ -55,9 +52,6 @@ const PROVIDER_SKILL_DIRS: Record<string, () => SkillSource[]> = {
       { label: "Cursor 规则技能", dir: path.join(home, ".cursor", "skills-cursor") },
       { label: "Agents 技能", dir: path.join(home, ".agents", "skills") },
     ];
-  },
-  "qoder-cli": () => {
-    return [{ label: "Qoder CLI Agents", dir: path.join(os.homedir(), ".agents", "skills") }];
   },
 };
 

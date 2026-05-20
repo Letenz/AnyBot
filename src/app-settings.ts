@@ -12,7 +12,6 @@ export type AppTheme = "light" | "dark" | "system";
 
 export interface ProviderRuntimeSettings {
   bin?: string;
-  approvalMode?: string;
   maxTurns?: number;
   workspace?: string;
   apiKey?: string;
@@ -97,7 +96,6 @@ function normalizeProviderSettings(value: unknown): ProviderRuntimeSettings {
   const raw = value as Record<string, unknown>;
   const settings: ProviderRuntimeSettings = {};
   if (typeof raw.bin === "string") settings.bin = raw.bin;
-  if (typeof raw.approvalMode === "string") settings.approvalMode = raw.approvalMode;
   if (typeof raw.workspace === "string") settings.workspace = raw.workspace;
   if (typeof raw.apiKey === "string") settings.apiKey = raw.apiKey;
   if (typeof raw.apiKeyHelper === "string") settings.apiKeyHelper = raw.apiKeyHelper;

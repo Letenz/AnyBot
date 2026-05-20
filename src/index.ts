@@ -9,6 +9,7 @@ import {
   getProvider,
   getProviderConfig,
   createProvider,
+  getRegisteredProviderTypes,
   normalizeProviderType,
   ProviderTimeoutError,
   ProviderProcessError,
@@ -56,7 +57,26 @@ import {
   type PublicChangeReview,
 } from "./web/change-review.js";
 
-const providerType = readPersistedProviderType() || normalizeProviderType(process.env.PROVIDER || "codex");
+function isRegisteredProviderType(providerType: string): boolean {
+  return getRegisteredProviderTypes().includes(providerType);
+}
+
+function resolveInitialProviderType(): string {
+  const persisted = readPersistedProviderType();
+  if (persisted) return persisted;
+
+  const requested = normalizeProviderType(process.env.PROVIDER || "codex");
+  if (isRegisteredProviderType(requested)) return requested;
+
+  logger.warn("provider.initial_unsupported", {
+    provider: requested,
+    fallback: "codex",
+    available: getRegisteredProviderTypes(),
+  });
+  return "codex";
+}
+
+const providerType = resolveInitialProviderType();
 
 const provider = initProvider(providerType, getProviderConfig(providerType));
 
@@ -163,6 +183,14 @@ function getOrCreateChannelSession(
 function getSessionProvider(session: db.ChatSession) {
   if (!session.provider) {
     session.provider = getProvider().type;
+  } else if (!isRegisteredProviderType(session.provider)) {
+    const fallbackProvider = getProvider().type;
+    logger.warn("chat.session_provider_unsupported", {
+      sessionId: session.id,
+      provider: session.provider,
+      fallback: fallbackProvider,
+    });
+    session.provider = fallbackProvider;
   }
   const currentProvider = getProvider();
   return session.provider === currentProvider.type

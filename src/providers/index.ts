@@ -1,9 +1,7 @@
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import type { IProvider } from "./types.js";
 import { CodexProvider } from "./codex.js";
-import { GeminiCliProvider } from "./gemini-cli.js";
 import { CursorCliProvider } from "./cursor-cli.js";
-import { QoderCliProvider } from "./qoder-cli.js";
 import { ClaudeCodeProvider } from "./claude-code.js";
 import { resolveExecutable } from "../utils/process.js";
 import { getProviderRuntimeSettings } from "../app-settings.js";
@@ -35,23 +33,11 @@ export function getProviderConfig(type: string): Record<string, unknown> {
   switch (normalizeProviderType(type)) {
     case "codex":
       return dropUndefined({ bin: process.env.CODEX_BIN || settings.bin });
-    case "gemini-cli":
-      return dropUndefined({
-        bin: process.env.GEMINI_CLI_BIN || settings.bin,
-        approvalMode: process.env.GEMINI_CLI_APPROVAL_MODE || settings.approvalMode || "yolo",
-      });
     case "cursor-cli":
       return dropUndefined({
         bin: process.env.CURSOR_CLI_BIN || settings.bin,
         workspace: process.env.CURSOR_CLI_WORKSPACE || settings.workspace,
         apiKey: process.env.CURSOR_API_KEY || settings.apiKey,
-      });
-    case "qoder-cli":
-      return dropUndefined({
-        bin: process.env.QODER_CLI_BIN || settings.bin,
-        maxTurns: process.env.QODER_CLI_MAX_TURNS
-          ? parseInt(process.env.QODER_CLI_MAX_TURNS, 10)
-          : settings.maxTurns,
       });
     case "claude-code":
       return dropUndefined({
@@ -92,21 +78,11 @@ const providerFactories: Record<string, ProviderFactory> = {
       anthropicHaikuModel: config?.anthropicHaikuModel as string | undefined,
       claudeCodeSubagentModel: config?.claudeCodeSubagentModel as string | undefined,
     }),
-  "gemini-cli": (config) =>
-    new GeminiCliProvider({
-      bin: config?.bin as string | undefined,
-      approvalMode: config?.approvalMode as string | undefined,
-    }),
   "cursor-cli": (config) =>
     new CursorCliProvider({
       bin: config?.bin as string | undefined,
       workspace: config?.workspace as string | undefined,
       apiKey: config?.apiKey as string | undefined,
-    }),
-  "qoder-cli": (config) =>
-    new QoderCliProvider({
-      bin: config?.bin as string | undefined,
-      maxTurns: config?.maxTurns as number | undefined,
     }),
 };
 
@@ -122,12 +98,8 @@ function getProviderBin(type: string, config: Record<string, unknown>): string {
   switch (normalizeProviderType(type)) {
     case "codex":
       return (config.bin as string | undefined) || "codex";
-    case "gemini-cli":
-      return (config.bin as string | undefined) || "gemini";
     case "cursor-cli":
       return (config.bin as string | undefined) || "agent";
-    case "qoder-cli":
-      return (config.bin as string | undefined) || "qodercli";
     case "claude-code":
       return (config.pathToClaudeCodeExecutable as string | undefined) || "bundled Claude Code";
     default:
@@ -139,12 +111,8 @@ function getProviderInstallHint(type: string): string {
   switch (normalizeProviderType(type)) {
     case "codex":
       return "npm install -g @openai/codex";
-    case "gemini-cli":
-      return "详见 https://github.com/google-gemini/gemini-cli";
     case "cursor-cli":
       return "详见 https://docs.cursor.com/cli";
-    case "qoder-cli":
-      return "详见 https://docs.qoder.com";
     case "claude-code":
       return "使用随 @anthropic-ai/claude-agent-sdk 安装的 Claude Code native binary；如需指定外部 CLI，可设置 CLAUDE_CODE_BIN";
     default:
@@ -216,9 +184,7 @@ export type {
   ProviderConfig,
 } from "./types.js";
 export { CodexProvider } from "./codex.js";
-export { GeminiCliProvider } from "./gemini-cli.js";
 export { CursorCliProvider } from "./cursor-cli.js";
-export { QoderCliProvider } from "./qoder-cli.js";
 export { ClaudeCodeProvider } from "./claude-code.js";
 export {
   ProviderTimeoutError,

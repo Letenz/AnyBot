@@ -89,16 +89,28 @@ function isStreamingProvider(
   return typeof provider.runWithEvents === "function";
 }
 
+function isRegisteredProviderType(providerType: string): boolean {
+  return getRegisteredProviderTypes().includes(providerType);
+}
+
 function getSessionProvider(session: Pick<db.ChatSession, "provider">): IProvider {
   const currentProvider = getProvider();
-  const providerType = session.provider || currentProvider.type;
+  const providerType = bindSessionProvider(session);
   if (providerType === currentProvider.type) return currentProvider;
   return createProvider(providerType);
 }
 
 function bindSessionProvider(session: Pick<db.ChatSession, "provider">): string {
-  if (session.provider) return session.provider;
-  session.provider = getProvider().type;
+  if (!session.provider || !isRegisteredProviderType(session.provider)) {
+    const fallbackProvider = getProvider().type;
+    if (session.provider) {
+      logger.warn("web.session_provider_unsupported", {
+        provider: session.provider,
+        fallback: fallbackProvider,
+      });
+    }
+    session.provider = fallbackProvider;
+  }
   return session.provider;
 }
 
