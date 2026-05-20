@@ -31,6 +31,7 @@ function getClaudeCodeBin(): string | undefined {
 
 export function getProviderConfig(type: string): Record<string, unknown> {
   const settings = getProviderRuntimeSettings(normalizeProviderType(type));
+  const useAnthropicCompat = settings.anthropicCompatEnabled === true;
   switch (normalizeProviderType(type)) {
     case "codex":
       return dropUndefined({ bin: process.env.CODEX_BIN || settings.bin });
@@ -55,7 +56,15 @@ export function getProviderConfig(type: string): Record<string, unknown> {
     case "claude-code":
       return dropUndefined({
         pathToClaudeCodeExecutable: getClaudeCodeBin() || settings.pathToClaudeCodeExecutable || settings.bin,
-        defaultModel: process.env.CLAUDE_AGENT_MODEL || settings.defaultModel,
+        defaultModel: process.env.CLAUDE_AGENT_MODEL || (useAnthropicCompat ? settings.defaultModel || settings.anthropicAutoModel : undefined),
+        apiKey: process.env.ANTHROPIC_API_KEY || (useAnthropicCompat ? settings.apiKey : undefined),
+        apiKeyHelper: process.env.CLAUDE_CODE_API_KEY_HELPER || (useAnthropicCompat ? settings.apiKeyHelper : undefined),
+        anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL || (useAnthropicCompat ? settings.anthropicBaseUrl : undefined),
+        anthropicAutoModel: process.env.ANTHROPIC_MODEL || (useAnthropicCompat ? settings.anthropicAutoModel : undefined),
+        anthropicOpusModel: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || (useAnthropicCompat ? settings.anthropicOpusModel : undefined),
+        anthropicSonnetModel: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || (useAnthropicCompat ? settings.anthropicSonnetModel : undefined),
+        anthropicHaikuModel: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || (useAnthropicCompat ? settings.anthropicHaikuModel : undefined),
+        claudeCodeSubagentModel: process.env.CLAUDE_CODE_SUBAGENT_MODEL || (useAnthropicCompat ? settings.claudeCodeSubagentModel : undefined),
         maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
           ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
           : settings.maxTurns,
@@ -74,6 +83,14 @@ const providerFactories: Record<string, ProviderFactory> = {
       maxTurns: config?.maxTurns as number | undefined,
       permissionMode: config?.permissionMode as PermissionMode | undefined,
       defaultModel: config?.defaultModel as string | undefined,
+      apiKey: config?.apiKey as string | undefined,
+      apiKeyHelper: config?.apiKeyHelper as string | undefined,
+      anthropicBaseUrl: config?.anthropicBaseUrl as string | undefined,
+      anthropicAutoModel: config?.anthropicAutoModel as string | undefined,
+      anthropicOpusModel: config?.anthropicOpusModel as string | undefined,
+      anthropicSonnetModel: config?.anthropicSonnetModel as string | undefined,
+      anthropicHaikuModel: config?.anthropicHaikuModel as string | undefined,
+      claudeCodeSubagentModel: config?.claudeCodeSubagentModel as string | undefined,
     }),
   "gemini-cli": (config) =>
     new GeminiCliProvider({

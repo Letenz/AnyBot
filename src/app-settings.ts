@@ -16,9 +16,17 @@ export interface ProviderRuntimeSettings {
   maxTurns?: number;
   workspace?: string;
   apiKey?: string;
+  apiKeyHelper?: string;
   permissionMode?: string;
   defaultModel?: string;
   pathToClaudeCodeExecutable?: string;
+  anthropicCompatEnabled?: boolean;
+  anthropicBaseUrl?: string;
+  anthropicAutoModel?: string;
+  anthropicOpusModel?: string;
+  anthropicSonnetModel?: string;
+  anthropicHaikuModel?: string;
+  claudeCodeSubagentModel?: string;
 }
 
 export interface AppSettings {
@@ -92,8 +100,20 @@ function normalizeProviderSettings(value: unknown): ProviderRuntimeSettings {
   if (typeof raw.approvalMode === "string") settings.approvalMode = raw.approvalMode;
   if (typeof raw.workspace === "string") settings.workspace = raw.workspace;
   if (typeof raw.apiKey === "string") settings.apiKey = raw.apiKey;
+  if (typeof raw.apiKeyHelper === "string") settings.apiKeyHelper = raw.apiKeyHelper;
   if (typeof raw.permissionMode === "string") settings.permissionMode = raw.permissionMode;
   if (typeof raw.defaultModel === "string") settings.defaultModel = raw.defaultModel;
+  if (typeof raw.anthropicCompatEnabled === "boolean") {
+    settings.anthropicCompatEnabled = raw.anthropicCompatEnabled;
+  }
+  if (typeof raw.anthropicBaseUrl === "string") settings.anthropicBaseUrl = raw.anthropicBaseUrl;
+  if (typeof raw.anthropicAutoModel === "string") settings.anthropicAutoModel = raw.anthropicAutoModel;
+  if (typeof raw.anthropicOpusModel === "string") settings.anthropicOpusModel = raw.anthropicOpusModel;
+  if (typeof raw.anthropicSonnetModel === "string") settings.anthropicSonnetModel = raw.anthropicSonnetModel;
+  if (typeof raw.anthropicHaikuModel === "string") settings.anthropicHaikuModel = raw.anthropicHaikuModel;
+  if (typeof raw.claudeCodeSubagentModel === "string") {
+    settings.claudeCodeSubagentModel = raw.claudeCodeSubagentModel;
+  }
   if (typeof raw.pathToClaudeCodeExecutable === "string") {
     settings.pathToClaudeCodeExecutable = raw.pathToClaudeCodeExecutable;
   }

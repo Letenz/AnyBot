@@ -74,6 +74,7 @@
         const settingsWebPort = document.getElementById('settings-web-port');
         const settingsProviderModelSelect = document.getElementById('settings-provider-model-select');
         const settingsProviderStatus = document.getElementById('settings-provider-status');
+        const settingsProviderCompatToggleFields = document.getElementById('settings-provider-compat-toggle-fields');
         const settingsProviderBinFields = document.getElementById('settings-provider-bin-fields');
         const settingsProviderExtraFields = document.getElementById('settings-provider-extra-fields');
         const settingsProviderDetectBtn = document.getElementById('settings-provider-detect-btn');
@@ -1885,88 +1886,167 @@
             return appSettings.providers[providerType];
         }
 
+        var PROVIDER_SETTINGS_DEFINITIONS = {
+            'claude-code': {
+                isExpanded: function (cfg) {
+                    return cfg.anthropicCompatEnabled === true;
+                },
+                buildToggle: buildClaudeCodeCompatToggle,
+                bindToggle: bindClaudeCodeCompatToggle,
+                buildFields: buildClaudeCodeCompatFields,
+                collect: collectClaudeCodeCompatSettings,
+                validate: validateClaudeCodeSettings,
+                refreshProviderOnSave: true,
+                showModelSelect: true,
+            },
+        };
+
+        function getProviderSettingsDefinition(providerType) {
+            return PROVIDER_SETTINGS_DEFINITIONS[providerType] || null;
+        }
+
         function renderSettingsProviderDetails() {
             var provider = getSelectedSettingsProvider();
             if (!provider || !appSettings) return;
             var cfg = getProviderSettings(provider.type);
-            if (settingsProviderStatus) {
-                settingsProviderStatus.className = 'provider-status ' + (provider.installed === false ? 'warn' : 'ok');
-                settingsProviderStatus.textContent = provider.installed === false
-                    ? '未检测到 ' + (provider.bin || provider.displayName) + '。' + (provider.installHint || '')
-                    : '已检测到：' + (provider.executablePath || provider.bin || provider.displayName);
+            var definition = getProviderSettingsDefinition(provider.type);
+            var hasProviderSettings = !!definition;
+            var showProviderFields = !!(definition && definition.isExpanded(cfg));
+            var providerModelField = settingsProviderModelSelect && settingsProviderModelSelect.closest('.settings-field');
+            var providerActions = settingsSaveBtn && settingsSaveBtn.closest('.settings-button-row');
+            if (providerModelField) {
+                providerModelField.style.display = showProviderFields && definition.showModelSelect ? '' : 'none';
+            }
+            if (providerActions) providerActions.style.display = showProviderFields ? '' : 'none';
+            if (settingsProviderCompatToggleFields) {
+                settingsProviderCompatToggleFields.style.display = hasProviderSettings ? '' : 'none';
+                settingsProviderCompatToggleFields.innerHTML = definition ? definition.buildToggle(cfg) : '';
+                if (definition && definition.bindToggle) definition.bindToggle(cfg);
             }
             if (settingsProviderBinFields) {
-                var binValue = cfg.bin || cfg.pathToClaudeCodeExecutable || '';
-                settingsProviderBinFields.innerHTML =
-                    '<label class="settings-row">' +
-                    '<span><strong>CLI 路径</strong><small>留空时使用默认命令或内置运行时</small></span>' +
-                    '<input class="settings-inline-input" id="settings-provider-bin-input" type="text" value="' + escapeHtml(binValue) + '" placeholder="' + escapeHtml(provider.bin || provider.type) + '" spellcheck="false">' +
-                    '</label>';
+                settingsProviderBinFields.style.display = 'none';
+                settingsProviderBinFields.innerHTML = '';
             }
             if (settingsProviderExtraFields) {
-                settingsProviderExtraFields.innerHTML = buildProviderExtraFields(provider.type, cfg);
+                settingsProviderExtraFields.style.display = showProviderFields ? '' : 'none';
+                settingsProviderExtraFields.innerHTML = showProviderFields ? definition.buildFields(cfg) : '';
             }
-            fetchSettingsModelConfig(provider.type);
+            if (showProviderFields && definition.showModelSelect) fetchSettingsModelConfig(provider.type);
         }
 
-        function buildProviderExtraFields(providerType, cfg) {
-            if (providerType === 'gemini-cli') {
-                var approval = cfg.approvalMode || 'yolo';
-                return '<label class="settings-row"><span><strong>Approval Mode</strong><small>Gemini CLI 操作审批方式</small></span>' +
-                    '<select class="settings-inline-select" id="settings-provider-approval">' +
-                    '<option value="yolo"' + (approval === 'yolo' ? ' selected' : '') + '>yolo</option>' +
-                    '<option value="auto-edit"' + (approval === 'auto-edit' ? ' selected' : '') + '>auto-edit</option>' +
-                    '<option value="confirm"' + (approval === 'confirm' ? ' selected' : '') + '>confirm</option>' +
-                    '</select></label>';
+        function buildClaudeCodeCompatToggle(cfg) {
+            var checked = cfg.anthropicCompatEnabled === true;
+            return '<div class="settings-row compat-toggle-row"><span><strong>自定义 Anthropic 兼容接口</strong><small>开启后使用下方 URL、密钥和模型映射</small></span>' +
+                '<label class="settings-switch" aria-label="自定义 Anthropic 兼容接口">' +
+                '<input id="settings-provider-anthropic-compat-enabled" type="checkbox"' + (checked ? ' checked' : '') + '>' +
+                '<span class="settings-switch-slider"></span>' +
+                '</label></div>';
+        }
+
+        function bindClaudeCodeCompatToggle() {
+            var compatToggle = document.getElementById('settings-provider-anthropic-compat-enabled');
+            if (compatToggle) compatToggle.addEventListener('change', handleClaudeCodeCompatToggle);
+        }
+
+        async function handleClaudeCodeCompatToggle(e) {
+            var cfg = getProviderSettings('claude-code');
+            var enabled = e.currentTarget.checked === true;
+            cfg.anthropicCompatEnabled = enabled;
+            if (enabled) {
+                renderSettingsProviderDetails();
+                return;
             }
-            if (providerType === 'cursor-cli') {
-                return '<label class="settings-row"><span><strong>Workspace</strong><small>Cursor CLI 默认 workspace</small></span>' +
-                    '<input class="settings-inline-input" id="settings-provider-workspace" value="' + escapeHtml(cfg.workspace || '') + '" spellcheck="false"></label>' +
-                    '<label class="settings-row"><span><strong>API Key</strong><small>仅在需要 Cursor API Key 时填写</small></span>' +
-                    '<input class="settings-inline-input" id="settings-provider-api-key" type="password" value="' + escapeHtml(cfg.apiKey || '') + '"></label>';
+            await persistAppSettingsPatch({ providers: { 'claude-code': Object.assign({}, cfg, { anthropicCompatEnabled: false }) } }, '已关闭');
+            if (providerData && providerData.current === 'claude-code') {
+                await switchProviderTo('claude-code', { force: true, closeOnSuccess: false });
             }
-            if (providerType === 'qoder-cli') {
-                return '<label class="settings-row"><span><strong>Max Turns</strong><small>Qoder CLI 最大轮数</small></span>' +
-                    '<input class="settings-inline-input short" id="settings-provider-max-turns" type="number" min="1" value="' + escapeHtml(String(cfg.maxTurns || '')) + '"></label>';
-            }
-            if (providerType === 'claude-code') {
-                var permission = cfg.permissionMode || '';
-                return '<label class="settings-row"><span><strong>Max Turns</strong><small>Claude Code 最大轮数</small></span>' +
-                    '<input class="settings-inline-input short" id="settings-provider-max-turns" type="number" min="1" value="' + escapeHtml(String(cfg.maxTurns || '')) + '"></label>' +
-                    '<label class="settings-row"><span><strong>Permission Mode</strong><small>留空则按默认 Sandbox 映射</small></span>' +
-                    '<select class="settings-inline-select" id="settings-provider-permission">' +
-                    '<option value=""' + (!permission ? ' selected' : '') + '>自动</option>' +
-                    '<option value="default"' + (permission === 'default' ? ' selected' : '') + '>default</option>' +
-                    '<option value="acceptEdits"' + (permission === 'acceptEdits' ? ' selected' : '') + '>acceptEdits</option>' +
-                    '<option value="bypassPermissions"' + (permission === 'bypassPermissions' ? ' selected' : '') + '>bypassPermissions</option>' +
-                    '</select></label>';
-            }
-            return '<div class="provider-status">当前提供商没有额外参数。</div>';
+            renderSettingsProviderDetails();
+        }
+
+        function buildClaudeCodeCompatFields(cfg) {
+            return '<label class="settings-row"><span><strong>Anthropic Base URL</strong><small>兼容 Anthropic API 的服务地址</small></span>' +
+                '<input class="settings-inline-input" id="settings-provider-anthropic-base-url" type="url" value="' + escapeHtml(cfg.anthropicBaseUrl || '') + '" spellcheck="false"></label>' +
+                '<label class="settings-row"><span><strong>API Key</strong><small>访问兼容服务所需的密钥</small></span>' +
+                '<input class="settings-inline-input" id="settings-provider-api-key" type="password" value="' + escapeHtml(cfg.apiKey || '') + '"></label>' +
+                '<label class="settings-row"><span><strong>Auto 模型</strong><small>用于 Auto 模型</small></span>' +
+                '<input class="settings-inline-input" id="settings-provider-anthropic-auto-model" value="' + escapeHtml(cfg.anthropicAutoModel || cfg.defaultModel || '') + '" spellcheck="false"></label>' +
+                '<label class="settings-row"><span><strong>Opus 模型</strong><small>用于 Opus 模型</small></span>' +
+                '<input class="settings-inline-input" id="settings-provider-anthropic-opus-model" value="' + escapeHtml(cfg.anthropicOpusModel || '') + '" spellcheck="false"></label>' +
+                '<label class="settings-row"><span><strong>Sonnet 模型</strong><small>用于 Sonnet 模型</small></span>' +
+                '<input class="settings-inline-input" id="settings-provider-anthropic-sonnet-model" value="' + escapeHtml(cfg.anthropicSonnetModel || '') + '" spellcheck="false"></label>' +
+                '<label class="settings-row"><span><strong>Haiku / Fast 模型</strong><small>用于轻量或快速模型</small></span>' +
+                '<input class="settings-inline-input" id="settings-provider-anthropic-haiku-model" value="' + escapeHtml(cfg.anthropicHaikuModel || '') + '" spellcheck="false"></label>' +
+                '<label class="settings-row"><span><strong>Subagent 模型</strong><small>用于子任务模型</small></span>' +
+                '<input class="settings-inline-input" id="settings-provider-subagent-model" value="' + escapeHtml(cfg.claudeCodeSubagentModel || '') + '" spellcheck="false"></label>';
         }
 
         function collectProviderSettings(providerType) {
             var current = getProviderSettings(providerType);
+            var definition = getProviderSettingsDefinition(providerType);
+            if (definition && definition.collect) return definition.collect(current);
             var next = Object.assign({}, current);
             var binInput = document.getElementById('settings-provider-bin-input');
-            var approvalInput = document.getElementById('settings-provider-approval');
-            var workspaceInput = document.getElementById('settings-provider-workspace');
-            var apiKeyInput = document.getElementById('settings-provider-api-key');
-            var maxTurnsInput = document.getElementById('settings-provider-max-turns');
-            var permissionInput = document.getElementById('settings-provider-permission');
             if (binInput) next.bin = binInput.value.trim();
-            if (approvalInput) next.approvalMode = approvalInput.value;
-            if (workspaceInput) next.workspace = workspaceInput.value.trim();
-            if (apiKeyInput) next.apiKey = apiKeyInput.value;
-            if (maxTurnsInput) {
-                var maxTurns = parseInt(maxTurnsInput.value, 10);
-                if (Number.isFinite(maxTurns) && maxTurns > 0) next.maxTurns = maxTurns;
-                else delete next.maxTurns;
-            }
-            if (permissionInput) next.permissionMode = permissionInput.value;
             Object.keys(next).forEach(function (key) {
                 if (next[key] === '') delete next[key];
             });
             return next;
+        }
+
+        function collectClaudeCodeCompatSettings(current) {
+            var next = Object.assign({}, current, { anthropicCompatEnabled: true });
+            var binInput = document.getElementById('settings-provider-bin-input');
+            var apiKeyInput = document.getElementById('settings-provider-api-key');
+            var anthropicBaseUrlInput = document.getElementById('settings-provider-anthropic-base-url');
+            var anthropicAutoModelInput = document.getElementById('settings-provider-anthropic-auto-model');
+            var anthropicOpusModelInput = document.getElementById('settings-provider-anthropic-opus-model');
+            var anthropicSonnetModelInput = document.getElementById('settings-provider-anthropic-sonnet-model');
+            var anthropicHaikuModelInput = document.getElementById('settings-provider-anthropic-haiku-model');
+            var subagentModelInput = document.getElementById('settings-provider-subagent-model');
+            if (binInput) {
+                next.pathToClaudeCodeExecutable = binInput.value.trim();
+                delete next.bin;
+            }
+            if (apiKeyInput) next.apiKey = apiKeyInput.value;
+            if (anthropicBaseUrlInput) next.anthropicBaseUrl = anthropicBaseUrlInput.value.trim();
+            if (anthropicAutoModelInput) {
+                next.anthropicAutoModel = anthropicAutoModelInput.value.trim();
+                next.defaultModel = next.anthropicAutoModel;
+            }
+            if (anthropicOpusModelInput) next.anthropicOpusModel = anthropicOpusModelInput.value.trim();
+            if (anthropicSonnetModelInput) next.anthropicSonnetModel = anthropicSonnetModelInput.value.trim();
+            if (anthropicHaikuModelInput) next.anthropicHaikuModel = anthropicHaikuModelInput.value.trim();
+            if (subagentModelInput) next.claudeCodeSubagentModel = subagentModelInput.value.trim();
+            Object.keys(next).forEach(function (key) {
+                if (next[key] === '') delete next[key];
+            });
+            return next;
+        }
+
+        function validateClaudeCodeSettings() {
+            var fields = [
+                ['Anthropic Base URL', document.getElementById('settings-provider-anthropic-base-url')],
+                ['API Key', document.getElementById('settings-provider-api-key')],
+                ['Auto 模型', document.getElementById('settings-provider-anthropic-auto-model')],
+                ['Opus 模型', document.getElementById('settings-provider-anthropic-opus-model')],
+                ['Sonnet 模型', document.getElementById('settings-provider-anthropic-sonnet-model')],
+                ['Haiku / Fast 模型', document.getElementById('settings-provider-anthropic-haiku-model')],
+                ['Subagent 模型', document.getElementById('settings-provider-subagent-model')],
+            ];
+            var missing = fields.filter(function (entry) {
+                var label = entry[0];
+                var input = entry[1];
+                if (!input) return false;
+                var value = input.value.trim();
+                return !value;
+            }).map(function (entry) {
+                return entry[0];
+            });
+            if (missing.length > 0) {
+                showSettingsStatus('请先填写：' + missing.join('、'), 'error');
+                return false;
+            }
+            return true;
         }
 
         if (settingsProviderTrigger) {
@@ -2303,14 +2383,50 @@
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({provider: providerType, modelId: modelId}),
                 });
-                if (res.ok && (!currentSessionProvider || currentSessionProvider === providerType)) {
-                    modelConfig = await res.json();
+                if (!res.ok) {
+                    var err = await res.json().catch(function () { return {}; });
+                    showError(err.error || '保存默认模型失败');
+                    return false;
+                }
+                var savedConfig = await res.json();
+                settingsModelConfig = savedConfig;
+                if (!currentSessionProvider || currentSessionProvider === providerType) {
+                    modelConfig = savedConfig;
                     updateModelBadgeLabel();
                     renderModelDropdown();
                 }
+                showSettingsStatus('已保存');
             } catch (e) {
                 showError('保存默认模型失败');
             }
+        }
+
+        async function saveSettingsProviderSettings() {
+            var provider = getSelectedSettingsProvider();
+            if (!provider || !isSettingsProviderSelectable(provider.type)) return false;
+            var currentSettings = getProviderSettings(provider.type);
+            var definition = getProviderSettingsDefinition(provider.type);
+            if (!definition || !definition.isExpanded(currentSettings)) return false;
+            if (definition.validate && !definition.validate()) {
+                return false;
+            }
+            var nextSettings = collectProviderSettings(provider.type);
+            var saved = await persistAppSettingsPatch({
+                providers: (function () {
+                    var providers = {};
+                    providers[provider.type] = nextSettings;
+                    return providers;
+                })(),
+            }, '已保存');
+            if (!saved) return false;
+
+            if (definition.refreshProviderOnSave && providerData && providerData.current === provider.type) {
+                await switchProviderTo(provider.type, { force: true, closeOnSuccess: false });
+            } else if (definition.showModelSelect) {
+                await fetchSettingsModelConfig(provider.type);
+            }
+            await fetchProviders();
+            return true;
         }
 
         async function switchProviderTo(providerType, opts) {
@@ -2366,11 +2482,14 @@
         });
 
         if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', closeSettingsPanel);
-        if (settingsProviderDetectBtn) {
-            settingsProviderDetectBtn.addEventListener('click', async function () {
-                await fetchProviders();
-                renderSettingsProviderDetails();
-                showSettingsStatus('检测完成');
+        if (settingsSaveBtn) {
+            settingsSaveBtn.addEventListener('click', saveSettingsProviderSettings);
+        }
+        if (settingsProviderModelSelect) {
+            settingsProviderModelSelect.addEventListener('change', function () {
+                var provider = getSelectedSettingsProvider();
+                if (!provider) return;
+                saveSettingsProviderModel(provider.type, settingsProviderModelSelect.value);
             });
         }
         if (settingsWorkdirPickBtn) {

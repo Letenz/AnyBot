@@ -177,24 +177,51 @@ export class ClaudeCodeProvider implements IProvider {
   private readonly maxTurns: number | undefined;
   private readonly permissionMode: PermissionMode | undefined;
   private readonly defaultModel: string | undefined;
+  private readonly apiKey: string | undefined;
+  private readonly apiKeyHelper: string | undefined;
+  private readonly anthropicBaseUrl: string | undefined;
+  private readonly anthropicAutoModel: string | undefined;
+  private readonly anthropicOpusModel: string | undefined;
+  private readonly anthropicSonnetModel: string | undefined;
+  private readonly anthropicHaikuModel: string | undefined;
+  private readonly claudeCodeSubagentModel: string | undefined;
 
   constructor(opts?: {
     pathToClaudeCodeExecutable?: string;
     maxTurns?: number;
     permissionMode?: PermissionMode;
     defaultModel?: string;
+    apiKey?: string;
+    apiKeyHelper?: string;
+    anthropicBaseUrl?: string;
+    anthropicAutoModel?: string;
+    anthropicOpusModel?: string;
+    anthropicSonnetModel?: string;
+    anthropicHaikuModel?: string;
+    claudeCodeSubagentModel?: string;
   }) {
     this.pathToClaudeCodeExecutable = opts?.pathToClaudeCodeExecutable;
     this.maxTurns = opts?.maxTurns;
     this.permissionMode = opts?.permissionMode;
     this.defaultModel = opts?.defaultModel;
+    this.apiKey = opts?.apiKey;
+    this.apiKeyHelper = opts?.apiKeyHelper;
+    this.anthropicBaseUrl = opts?.anthropicBaseUrl;
+    this.anthropicAutoModel = opts?.anthropicAutoModel;
+    this.anthropicOpusModel = opts?.anthropicOpusModel;
+    this.anthropicSonnetModel = opts?.anthropicSonnetModel;
+    this.anthropicHaikuModel = opts?.anthropicHaikuModel;
+    this.claudeCodeSubagentModel = opts?.claudeCodeSubagentModel;
   }
 
   listModels(): ProviderModel[] {
+    const describeMapping = (fallback: string, mapped?: string) =>
+      mapped ? `映射到 ${mapped}` : fallback;
+
     return [
-      { id: "auto", name: "Auto", description: "使用 Claude Code 默认模型" },
-      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", description: "默认推荐，均衡能力与速度" },
-      { id: "claude-opus-4-7", name: "Claude Opus 4.7", description: "最强复杂任务模型" },
+      { id: "auto", name: "Auto", description: describeMapping("使用 Claude Code 默认模型", this.anthropicAutoModel || this.defaultModel) },
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", description: describeMapping("默认推荐，均衡能力与速度", this.anthropicSonnetModel) },
+      { id: "claude-opus-4-7", name: "Claude Opus 4.7", description: describeMapping("最强复杂任务模型", this.anthropicOpusModel) },
     ];
   }
 
@@ -227,7 +254,9 @@ export class ClaudeCodeProvider implements IProvider {
     const startedAt = Date.now();
     const abortController = new AbortController();
     const permissionMode = this.permissionMode ?? mapSandboxToPermissionMode(sandbox);
-    const resultModel = model && model !== "auto" ? model : this.defaultModel;
+    const resultModel = this.resolveModelAlias(model && model !== "auto" ? model : undefined)
+      || this.anthropicAutoModel
+      || this.defaultModel;
 
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -263,10 +292,15 @@ export class ClaudeCodeProvider implements IProvider {
         ...process.env,
         CLAUDE_AGENT_SDK_CLIENT_APP: process.env.CLAUDE_AGENT_SDK_CLIENT_APP || "anybot/0.1.0",
       };
+      this.applyAnthropicEnv(env);
 
       if (!env.ANTHROPIC_API_KEY) {
         delete env.ANTHROPIC_API_KEY;
       }
+
+      const flagSettings: Options["settings"] | undefined = this.apiKeyHelper
+        ? { apiKeyHelper: this.apiKeyHelper }
+        : undefined;
 
       await onEvent?.({
         type: "agent_status",
@@ -340,6 +374,7 @@ export class ClaudeCodeProvider implements IProvider {
           includePartialMessages: !!onEvent,
           hooks,
           env,
+          settings: flagSettings,
         },
       });
 
@@ -495,5 +530,24 @@ export class ClaudeCodeProvider implements IProvider {
       clearTimeout(timer);
       signal?.removeEventListener("abort", abortFromSignal);
     }
+  }
+
+  private resolveModelAlias(model: string | undefined): string | undefined {
+    if (!model) return undefined;
+    if (model === "claude-opus-4-7") return this.anthropicOpusModel || model;
+    if (model === "claude-sonnet-4-6") return this.anthropicSonnetModel || model;
+    return model;
+  }
+
+  private applyAnthropicEnv(env: NodeJS.ProcessEnv): void {
+    if (this.apiKey) env.ANTHROPIC_API_KEY = this.apiKey;
+    if (this.anthropicBaseUrl) env.ANTHROPIC_BASE_URL = this.anthropicBaseUrl;
+    if (this.anthropicAutoModel || this.defaultModel) {
+      env.ANTHROPIC_MODEL = this.anthropicAutoModel || this.defaultModel;
+    }
+    if (this.anthropicOpusModel) env.ANTHROPIC_DEFAULT_OPUS_MODEL = this.anthropicOpusModel;
+    if (this.anthropicSonnetModel) env.ANTHROPIC_DEFAULT_SONNET_MODEL = this.anthropicSonnetModel;
+    if (this.anthropicHaikuModel) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = this.anthropicHaikuModel;
+    if (this.claudeCodeSubagentModel) env.CLAUDE_CODE_SUBAGENT_MODEL = this.claudeCodeSubagentModel;
   }
 }

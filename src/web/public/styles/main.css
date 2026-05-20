@@ -1356,6 +1356,22 @@
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
 
+        #settings-provider-model-select {
+            width: 100%;
+            min-width: 0;
+            height: 42px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 0 36px 0 12px;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 12 12' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M3 5l3 3 3-3' stroke='%236b7280' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 14px 14px;
+            cursor: pointer;
+        }
+
         .settings-inline-input.short {
             width: 120px;
             min-width: 120px;
@@ -1368,11 +1384,68 @@
             flex-shrink: 0;
         }
 
+        .compat-toggle-row {
+            min-height: 64px;
+        }
+
+        .settings-switch {
+            position: relative;
+            width: 46px;
+            height: 26px;
+            flex: 0 0 46px;
+            cursor: pointer;
+        }
+
+        .settings-switch input {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .settings-switch-slider {
+            position: absolute;
+            inset: 0;
+            border-radius: 999px;
+            background: var(--border);
+            transition: background 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .settings-switch-slider::before {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            top: 3px;
+            left: 3px;
+            border-radius: 50%;
+            background: var(--bg);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+            transition: transform 0.18s ease, background 0.18s ease;
+        }
+
+        .settings-switch input:checked + .settings-switch-slider {
+            background: var(--accent);
+        }
+
+        .settings-switch input:checked + .settings-switch-slider::before {
+            transform: translateX(20px);
+            background: #fff;
+        }
+
+        .settings-switch input:focus-visible + .settings-switch-slider {
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
         .settings-path-row,
         .settings-button-row {
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+
+        .provider-save-row {
+            justify-content: flex-end;
         }
 
         .settings-path-row .settings-inline-input {
