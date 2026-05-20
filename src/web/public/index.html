@@ -111,6 +111,7 @@
 
         <div id="input-area">
             <div id="attachment-preview" class="attachment-preview" style="display:none;"></div>
+            <div id="skill-picker" class="skill-picker" hidden></div>
             <div class="input-wrapper">
                 <input type="file" id="file-input" multiple hidden>
                 <button id="attach-btn" class="attach-btn" title="添加附件">
@@ -118,6 +119,7 @@
                         <path d="M14 8.5l-5.5 5.5a3.5 3.5 0 01-5-5L9 3.5a2 2 0 013 3L6.5 12a.5.5 0 01-.7-.7L11 6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </button>
+                <div id="selected-skills" class="selected-skills" hidden></div>
                 <textarea id="chat-input" placeholder="发送消息... 可粘贴图片或拖拽文件" rows="1"></textarea>
                 <div class="context-usage" id="context-usage" aria-label="上下文用量" tabindex="0">
                     <div class="context-usage-ring" id="context-usage-ring"></div>

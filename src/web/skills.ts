@@ -14,9 +14,17 @@ export interface SkillInfo {
   content: string;
 }
 
+export type SkillMentionInfo = Pick<SkillInfo, "id" | "name" | "description" | "source" | "enabled">;
+
 interface SkillSource {
   label: string;
   dir: string;
+}
+
+interface ScannedSkill {
+  name: string;
+  skillPath: string;
+  enabled: boolean;
 }
 
 const SKILL_FILE = "SKILL.md";
@@ -96,6 +104,17 @@ function parseSkillMd(content: string): { name: string; description: string } {
   return result;
 }
 
+function readSkillFrontmatter(skillPath: string): string {
+  const fd = fs.openSync(skillPath, "r");
+  try {
+    const buffer = Buffer.alloc(16 * 1024);
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf-8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function isDirectoryLike(dir: string, entry: fs.Dirent): boolean {
   if (entry.isDirectory()) return true;
   if (!entry.isSymbolicLink()) return false;
@@ -107,8 +126,8 @@ function isDirectoryLike(dir: string, entry: fs.Dirent): boolean {
   }
 }
 
-function scanSkillDir(dir: string): Array<{ name: string; skillPath: string; enabled: boolean }> {
-  const results: Array<{ name: string; skillPath: string; enabled: boolean }> = [];
+function scanSkillDir(dir: string): ScannedSkill[] {
+  const results: ScannedSkill[] = [];
 
   function scan(currentDir: string): void {
     try {
@@ -135,6 +154,22 @@ function scanSkillDir(dir: string): Array<{ name: string; skillPath: string; ena
   return results;
 }
 
+function syncPersistedDisabledState(id: string, item: ScannedSkill, disabled: Set<string>): void {
+  if (!item.enabled || !disabled.has(id)) return;
+
+  const skillDir = path.dirname(item.skillPath);
+  const disabledPath = path.join(skillDir, DISABLED_SKILL_FILE);
+  try {
+    if (!fs.existsSync(disabledPath)) {
+      fs.renameSync(item.skillPath, disabledPath);
+      item.skillPath = disabledPath;
+      item.enabled = false;
+    }
+  } catch {
+    // Keep reporting the actual file state if migration cannot be applied.
+  }
+}
+
 export function listSkills(): { skills: SkillInfo[]; sources: Array<{ label: string; dir: string; count: number }> } {
   const disabled = readDisabledSkills();
   const sources = getSkillSources();
@@ -147,20 +182,7 @@ export function listSkills(): { skills: SkillInfo[]; sources: Array<{ label: str
 
     for (const item of found) {
       const id = `${source.label}::${item.name}`;
-
-      if (item.enabled && disabled.has(id)) {
-        const skillDir = path.dirname(item.skillPath);
-        const disabledPath = path.join(skillDir, DISABLED_SKILL_FILE);
-        try {
-          if (!fs.existsSync(disabledPath)) {
-            fs.renameSync(item.skillPath, disabledPath);
-            item.skillPath = disabledPath;
-            item.enabled = false;
-          }
-        } catch {
-          // Keep reporting the actual file state if migration cannot be applied.
-        }
-      }
+      syncPersistedDisabledState(id, item, disabled);
 
       const content = fs.readFileSync(item.skillPath, "utf-8");
       const meta = parseSkillMd(content);
@@ -179,6 +201,32 @@ export function listSkills(): { skills: SkillInfo[]; sources: Array<{ label: str
 
   skills.sort((a, b) => a.name.localeCompare(b.name));
   return { skills, sources: sourceStats };
+}
+
+export function listSkillMentions(): SkillMentionInfo[] {
+  const disabled = readDisabledSkills();
+  const sources = getSkillSources();
+  const skills: SkillMentionInfo[] = [];
+
+  for (const source of sources) {
+    const found = scanSkillDir(source.dir);
+    for (const item of found) {
+      const id = `${source.label}::${item.name}`;
+      syncPersistedDisabledState(id, item, disabled);
+
+      const meta = parseSkillMd(readSkillFrontmatter(item.skillPath));
+      skills.push({
+        id,
+        name: meta.name || item.name,
+        description: meta.description || "",
+        source: source.label,
+        enabled: item.enabled,
+      });
+    }
+  }
+
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+  return skills;
 }
 
 export function toggleSkill(id: string, enabled: boolean): { ok: boolean; error?: string } {

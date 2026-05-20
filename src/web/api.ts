@@ -29,7 +29,7 @@ import {
   channelManager,
 } from "../channels/index.js";
 import { getWeixinLoginStatus } from "../channels/weixin.js";
-import { listSkills, toggleSkill, deleteSkill, openSkillsFolder } from "./skills.js";
+import { listSkills, listSkillMentions, toggleSkill, deleteSkill, openSkillsFolder } from "./skills.js";
 import { readProxyConfig, writeProxyConfig, getProxyUrl, type ProxyConfig } from "./proxy-config.js";
 import { applyProxy } from "../proxy.js";
 import {
@@ -333,11 +333,39 @@ function getSessionWorkdir(session: Pick<db.ChatSession, "projectId">): string {
 }
 
 type ChatAttachment = { path: string; name: string };
+type ChatPromptSkill = { id?: string; name?: string };
 
-function prepareWebChatInput(content?: string, attachments: ChatAttachment[] = []) {
+function normalizeWebChatSkills(skills: ChatPromptSkill[] = []): Array<{ id?: string; name: string }> {
+  const seen = new Set<string>();
+  const normalized: Array<{ id?: string; name: string }> = [];
+  for (const skill of skills) {
+    const name = String(skill?.name || "").trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    normalized.push({
+      ...(skill.id ? { id: String(skill.id) } : {}),
+      name,
+    });
+    if (normalized.length >= 8) break;
+  }
+  return normalized;
+}
+
+function prepareWebChatInput(
+  content?: string,
+  attachments: ChatAttachment[] = [],
+  skills: ChatPromptSkill[] = [],
+) {
   let userText = (content || "").trim();
   const imagePaths: string[] = [];
   const filePaths: ChatAttachment[] = [];
+  const skillInfo = normalizeWebChatSkills(skills);
+
+  if (skillInfo.length > 0) {
+    const skillNames = skillInfo.map((skill) => skill.name).join("、");
+    const skillPrompt = `本轮请使用这些技能：${skillNames}`;
+    userText = userText ? `${skillPrompt}\n\n${userText}` : skillPrompt;
+  }
 
   for (const att of attachments) {
     if (isImageFile(att.name)) {
@@ -357,13 +385,21 @@ function prepareWebChatInput(content?: string, attachments: ChatAttachment[] = [
   }
 
   const attachmentInfo = attachments.map((a) => ({ name: a.name, path: a.path }));
+  const metadata = {
+    ...(attachmentInfo.length > 0 ? { attachments: attachmentInfo } : {}),
+    ...(skillInfo.length > 0 ? { skills: skillInfo } : {}),
+  };
+  const storedFallback = skillInfo.length > 0
+    ? `使用技能：${skillInfo.map((skill) => skill.name).join("、")}`
+    : "[附件]";
   return {
     userText,
     imagePaths,
     fileCount: filePaths.length,
-    storedUserContent: content?.trim() || "[附件]",
-    titleText: content?.trim() || "文件分析",
-    userMetadata: attachmentInfo.length > 0 ? JSON.stringify({ attachments: attachmentInfo }) : null,
+    skillCount: skillInfo.length,
+    storedUserContent: content?.trim() || storedFallback,
+    titleText: content?.trim() || (skillInfo.length > 0 ? storedFallback : "文件分析"),
+    userMetadata: Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null,
   };
 }
 
@@ -725,6 +761,14 @@ export function chatRouter(): Router {
   router.get("/skills", (_req: Request, res: Response) => {
     try {
       res.json(listSkills());
+    } catch (error) {
+      res.status(500).json({ error: "读取技能列表失败" });
+    }
+  });
+
+  router.get("/skills/mentions", (_req: Request, res: Response) => {
+    try {
+      res.json({ skills: listSkillMentions() });
     } catch (error) {
       res.status(500).json({ error: "读取技能列表失败" });
     }
@@ -1099,13 +1143,16 @@ export function chatRouter(): Router {
       return;
     }
 
-    const { content, attachments, modelId } = req.body as {
+    const { content, attachments, skills, modelId } = req.body as {
       content?: string;
       attachments?: ChatAttachment[];
+      skills?: ChatPromptSkill[];
       modelId?: string;
     };
     const requestAttachments = Array.isArray(attachments) ? attachments : [];
-    if (!content?.trim() && requestAttachments.length === 0) {
+    const requestSkills = Array.isArray(skills) ? skills : [];
+    const input = prepareWebChatInput(content, requestAttachments, requestSkills);
+    if (!input.userText && requestAttachments.length === 0) {
       res.status(400).json({ error: "消息不能为空" });
       return;
     }
@@ -1118,7 +1165,6 @@ export function chatRouter(): Router {
       return;
     }
 
-    const input = prepareWebChatInput(content, requestAttachments);
     let prepared: PreparedChatTurn;
     try {
       prepared = prepareChatTurn({
@@ -1155,7 +1201,7 @@ export function chatRouter(): Router {
           signal: runAbortController.signal,
           stream: { emit },
           logPrefix: "web.chat.stream",
-          logFields: { fileCount: input.fileCount },
+          logFields: { fileCount: input.fileCount, skillCount: input.skillCount },
         });
       } catch {
         // runPreparedChatTurn 已记录日志并推送 error 事件，这里只负责收尾。
@@ -1179,13 +1225,16 @@ export function chatRouter(): Router {
       return;
     }
 
-    const { content, attachments, modelId } = req.body as {
+    const { content, attachments, skills, modelId } = req.body as {
       content?: string;
       attachments?: ChatAttachment[];
+      skills?: ChatPromptSkill[];
       modelId?: string;
     };
     const requestAttachments = Array.isArray(attachments) ? attachments : [];
-    if (!content?.trim() && requestAttachments.length === 0) {
+    const requestSkills = Array.isArray(skills) ? skills : [];
+    const input = prepareWebChatInput(content, requestAttachments, requestSkills);
+    if (!input.userText && requestAttachments.length === 0) {
       res.status(400).json({ error: "消息不能为空" });
       return;
     }
@@ -1197,8 +1246,6 @@ export function chatRouter(): Router {
       res.status(400).json({ error: error instanceof Error ? error.message : "项目目录不可用" });
       return;
     }
-
-    const input = prepareWebChatInput(content, requestAttachments);
 
     try {
       const result = await runChatTurn({
@@ -1212,7 +1259,7 @@ export function chatRouter(): Router {
         workdir: sessionWorkdir,
         includeWorkspaceMemory: !session.projectId,
         logPrefix: "web.chat",
-        logFields: { fileCount: input.fileCount },
+        logFields: { fileCount: input.fileCount, skillCount: input.skillCount },
       });
 
       res.json({

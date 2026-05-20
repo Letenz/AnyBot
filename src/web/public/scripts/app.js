@@ -145,6 +145,16 @@
         let inputHistoryFetchPromise = null;
         let inputHistoryNavigationPromise = null;
         let inputHistoryNavigationVersion = 0;
+        let skillPickerOpen = false;
+        let skillPickerQuery = '';
+        let skillPickerTokenStart = null;
+        let skillPickerTokenEnd = null;
+        let skillPickerItems = [];
+        let skillPickerFilteredItems = [];
+        let skillPickerActiveIndex = 0;
+        let isSkillPickerOpening = false;
+        let promptSkills = [];
+        let promptSkillDeleteIndex = null;
         let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
         let expandedProjectIds = readStoredSet('expandedProjectIds');
@@ -170,6 +180,8 @@
         const fileInput = document.getElementById('file-input');
         const attachBtn = document.getElementById('attach-btn');
         const attachmentPreview = document.getElementById('attachment-preview');
+        const skillPickerEl = document.getElementById('skill-picker');
+        const selectedSkillsEl = document.getElementById('selected-skills');
         const dropOverlay = document.getElementById('drop-overlay');
         let pendingAttachments = []; // { path, name, size, isImage, localUrl? }
 
@@ -380,7 +392,7 @@
             sendBtn.setAttribute('aria-label', sendBtn.title);
             sendBtn.disabled = isRunning
                 ? isCancellingResponse
-                : (inputEl.value.trim() === '' && pendingAttachments.length === 0);
+                : (inputEl.value.trim() === '' && pendingAttachments.length === 0 && promptSkills.length === 0);
         }
 
         function resizeChatInput() {
@@ -590,6 +602,349 @@
             });
         }
 
+        function getActiveSkillTrigger() {
+            if (typeof inputEl.selectionStart !== 'number' || typeof inputEl.selectionEnd !== 'number') return null;
+            if (inputEl.selectionStart !== inputEl.selectionEnd) return null;
+            var caret = inputEl.selectionStart;
+            var before = inputEl.value.slice(0, caret);
+            var match = before.match(/(^|\s)\/([^\s/]*)$/);
+            if (!match) return null;
+            return {
+                start: before.length - match[2].length - 1,
+                end: caret,
+                query: match[2],
+            };
+        }
+
+        function isValidSkillTrigger(trigger) {
+            if (!trigger) return false;
+            return isNaturalLanguageSkillTriggerContext(inputEl.value.slice(0, trigger.start));
+        }
+
+        function canOpenSkillPickerFromSlash(e) {
+            if (e.defaultPrevented || e.isComposing || e.metaKey || e.ctrlKey || e.altKey) return false;
+            if (typeof currentView !== 'undefined' && currentView !== 'chat') return false;
+            if (typeof inputEl.selectionStart !== 'number' || inputEl.selectionStart !== inputEl.selectionEnd) return false;
+            var before = inputEl.value.slice(0, inputEl.selectionStart);
+            return isNaturalLanguageSkillTriggerContext(before);
+        }
+
+        function isNaturalLanguageSkillTriggerContext(before) {
+            if (before === '') return true;
+            if (!/\s$/.test(before)) return false;
+
+            var trimmed = before.trim();
+            if (!trimmed) return true;
+            if (/[`"'([{<>=+*|&;]$/.test(trimmed)) return false;
+            if (/(^|[\s/\\])[\w.-]+\/[\w./-]*$/.test(trimmed)) return false;
+            if (/^(cd|ls|cat|open|node|npm|pnpm|yarn|git|curl|grep|rg|python|python3|pip|uv|docker|kubectl|ssh|scp)\b/i.test(trimmed)) {
+                return false;
+            }
+
+            return /[\u4e00-\u9fff]/.test(trimmed) ||
+                /[.!?,，。！？；：)]$/.test(trimmed) ||
+                trimmed.split(/\s+/).length >= 2;
+        }
+
+        function getSkillPickerEnabledItems() {
+            var list = skillMentionData && Array.isArray(skillMentionData.skills) ? skillMentionData.skills : [];
+            var selectedIds = new Set(promptSkills.map(function (skill) { return skill.id; }));
+            return list.filter(function (skill) {
+                return skill && skill.enabled && skill.name && !selectedIds.has(skill.id);
+            });
+        }
+
+        function filterSkillPickerItems() {
+            var term = skillPickerQuery.toLowerCase().trim();
+            var filtered = skillPickerItems;
+            if (term) {
+                filtered = filtered.filter(function (skill) {
+                    return String(skill.name || '').toLowerCase().startsWith(term);
+                });
+            }
+            skillPickerFilteredItems = filtered;
+            if (skillPickerActiveIndex >= skillPickerFilteredItems.length) {
+                skillPickerActiveIndex = Math.max(0, skillPickerFilteredItems.length - 1);
+            }
+        }
+
+        function closeSkillPicker(options) {
+            options = options || {};
+            if (!skillPickerEl) return;
+            if (options.removeTrigger && skillPickerTokenStart !== null && skillPickerTokenEnd !== null) {
+                var value = inputEl.value;
+                var nextValue = value.slice(0, skillPickerTokenStart) + value.slice(skillPickerTokenEnd);
+                inputEl.value = nextValue;
+                inputEl.setSelectionRange(skillPickerTokenStart, skillPickerTokenStart);
+                resizeChatInput();
+                updateSendBtnState();
+            }
+            skillPickerOpen = false;
+            skillPickerQuery = '';
+            skillPickerTokenStart = null;
+            skillPickerTokenEnd = null;
+            skillPickerFilteredItems = [];
+            skillPickerActiveIndex = 0;
+            skillPickerEl.hidden = true;
+            skillPickerEl.innerHTML = '';
+        }
+
+        function syncSkillPickerFromInput() {
+            var trigger = getActiveSkillTrigger();
+            if (!isValidSkillTrigger(trigger)) {
+                if (skillPickerOpen) closeSkillPicker();
+                return;
+            }
+            if (!skillPickerOpen) {
+                openSkillPicker(trigger);
+                return;
+            }
+            updateSkillPickerFromTrigger(trigger);
+        }
+
+        function updateSkillPickerFromTrigger(trigger) {
+            if (!skillPickerOpen) return;
+            if (!isValidSkillTrigger(trigger)) {
+                closeSkillPicker();
+                return;
+            }
+            skillPickerTokenStart = trigger.start;
+            skillPickerTokenEnd = trigger.end;
+            skillPickerQuery = trigger.query;
+            skillPickerActiveIndex = 0;
+            filterSkillPickerItems();
+            renderSkillPicker();
+        }
+
+        function moveSkillPickerActive(delta) {
+            if (skillPickerFilteredItems.length === 0) return;
+            var count = skillPickerFilteredItems.length;
+            skillPickerActiveIndex = (skillPickerActiveIndex + delta + count) % count;
+            renderSkillPicker();
+        }
+
+        function getSkillIconHtml(className) {
+            return '<svg class="' + className + '" viewBox="0 0 14 14" fill="none" aria-hidden="true">' +
+                '<path d="M7 1.2 11.7 3.9v5.4L7 12 2.3 9.3V3.9L7 1.2Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>' +
+                '<path d="M2.6 4.1 7 6.7l4.4-2.6M7 6.7V12" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>' +
+                '</svg>';
+        }
+
+        function renderPromptSkills() {
+            if (!selectedSkillsEl) return;
+            selectedSkillsEl.innerHTML = '';
+            selectedSkillsEl.hidden = promptSkills.length === 0;
+            promptSkills.forEach(function (skill, index) {
+                var chip = document.createElement('button');
+                chip.className = 'selected-skill-chip' + (index === promptSkillDeleteIndex ? ' pending-delete' : '');
+                chip.type = 'button';
+                chip.title = '移除技能 ' + skill.name;
+                chip.innerHTML =
+                    getSkillIconHtml('selected-skill-icon') +
+                    '<span class="selected-skill-name">' + escapeHtml(skill.name) + '</span>' +
+                    '<span class="selected-skill-remove" aria-hidden="true">×</span>';
+                chip.addEventListener('click', function () {
+                    promptSkillDeleteIndex = null;
+                    promptSkills.splice(index, 1);
+                    renderPromptSkills();
+                    updateSendBtnState();
+                    inputEl.focus();
+                });
+                selectedSkillsEl.appendChild(chip);
+            });
+        }
+
+        function addPromptSkill(skill) {
+            if (!skill || !skill.id || !skill.name) return;
+            var alreadySelected = promptSkills.some(function (item) {
+                return item.id === skill.id;
+            });
+            if (alreadySelected) return;
+            promptSkillDeleteIndex = null;
+            promptSkills.push({
+                id: skill.id,
+                name: skill.name,
+            });
+            renderPromptSkills();
+            updateSendBtnState();
+        }
+
+        function clearPromptSkills() {
+            promptSkills = [];
+            promptSkillDeleteIndex = null;
+            renderPromptSkills();
+            updateSendBtnState();
+        }
+
+        function clearPromptSkillDeleteTarget() {
+            if (promptSkillDeleteIndex === null) return;
+            promptSkillDeleteIndex = null;
+            renderPromptSkills();
+        }
+
+        function handlePromptSkillBackspace(e) {
+            if (e.key !== 'Backspace') {
+                if (e.key.length === 1 || e.key === 'Enter' || e.key === 'Escape') {
+                    clearPromptSkillDeleteTarget();
+                }
+                return false;
+            }
+            if (skillPickerOpen) return false;
+            if (promptSkills.length === 0) return false;
+            if (typeof inputEl.selectionStart !== 'number' || inputEl.selectionStart !== inputEl.selectionEnd) return false;
+            if (inputEl.selectionStart !== 0 || inputEl.value.length > 0) {
+                clearPromptSkillDeleteTarget();
+                return false;
+            }
+
+            e.preventDefault();
+            var lastIndex = promptSkills.length - 1;
+            if (promptSkillDeleteIndex === lastIndex) {
+                promptSkills.splice(lastIndex, 1);
+                promptSkillDeleteIndex = null;
+                renderPromptSkills();
+                updateSendBtnState();
+                return true;
+            }
+
+            promptSkillDeleteIndex = lastIndex;
+            renderPromptSkills();
+            return true;
+        }
+
+        function commitSkillPickerSkill(skill) {
+            if (!skill || skillPickerTokenStart === null || skillPickerTokenEnd === null) return;
+            var value = inputEl.value;
+            var nextValue = value.slice(0, skillPickerTokenStart) + value.slice(skillPickerTokenEnd);
+            inputEl.value = nextValue;
+            inputEl.setSelectionRange(skillPickerTokenStart, skillPickerTokenStart);
+            resizeChatInput();
+            addPromptSkill(skill);
+            closeSkillPicker();
+            inputEl.focus();
+        }
+
+        function renderSkillPicker() {
+            if (!skillPickerEl || !skillPickerOpen) return;
+            filterSkillPickerItems();
+
+            skillPickerEl.hidden = false;
+            skillPickerEl.innerHTML = '';
+
+            var header = document.createElement('div');
+            header.className = 'skill-picker-header';
+            header.innerHTML =
+                '<span>技能</span>' +
+                '<span class="skill-picker-count">' + skillPickerFilteredItems.length + '</span>';
+            skillPickerEl.appendChild(header);
+
+            var list = document.createElement('div');
+            list.className = 'skill-picker-list';
+            list.setAttribute('role', 'listbox');
+            list.setAttribute('aria-label', '技能列表');
+
+            if (skillPickerFilteredItems.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'skill-picker-empty';
+                empty.textContent = skillPickerItems.length === 0 ? '暂无已启用技能' : '没有匹配的技能';
+                list.appendChild(empty);
+            } else {
+                skillPickerFilteredItems.forEach(function (skill, index) {
+                    var item = document.createElement('button');
+                    item.className = 'skill-picker-item' +
+                        (index === skillPickerActiveIndex ? ' active' : '');
+                    item.type = 'button';
+                    item.setAttribute('role', 'option');
+                    item.setAttribute('aria-selected', index === skillPickerActiveIndex ? 'true' : 'false');
+                    item.innerHTML =
+                        getSkillIconHtml('skill-picker-icon') +
+                        '<span class="skill-picker-copy">' +
+                        '<span class="skill-picker-name">' + escapeHtml(skill.name) + '</span>' +
+                        '<span class="skill-picker-desc">' + escapeHtml(skill.description || '') + '</span>' +
+                        '</span>' +
+                        '<span class="skill-picker-source">' + escapeHtml(skill.source || '') + '</span>';
+                    item.addEventListener('mouseenter', function () {
+                        skillPickerActiveIndex = index;
+                        renderSkillPicker();
+                    });
+                    item.addEventListener('click', function () {
+                        commitSkillPickerSkill(skill);
+                    });
+                    list.appendChild(item);
+                });
+            }
+
+            skillPickerEl.appendChild(list);
+
+            var activeItem = list.querySelector('.skill-picker-item.active');
+            if (activeItem) activeItem.scrollIntoView({ block: 'nearest' });
+        }
+
+        async function openSkillPicker(initialTrigger) {
+            if (!skillPickerEl) return;
+            if (isSkillPickerOpening) return;
+            var startingTrigger = initialTrigger || getActiveSkillTrigger();
+            if (!isValidSkillTrigger(startingTrigger)) return;
+            isSkillPickerOpening = true;
+            try {
+                await fetchSkillMentionData();
+            } finally {
+                isSkillPickerOpening = false;
+            }
+            var trigger = getActiveSkillTrigger();
+            if (!isValidSkillTrigger(trigger)) return;
+            skillPickerItems = getSkillPickerEnabledItems();
+            skillPickerOpen = true;
+            skillPickerTokenStart = trigger.start;
+            skillPickerTokenEnd = trigger.end;
+            skillPickerQuery = trigger.query;
+            skillPickerActiveIndex = 0;
+            renderSkillPicker();
+        }
+
+        function insertSkillSlashTrigger() {
+            var caret = inputEl.selectionStart;
+            var value = inputEl.value;
+            inputEl.value = value.slice(0, caret) + '/' + value.slice(inputEl.selectionEnd);
+            inputEl.setSelectionRange(caret + 1, caret + 1);
+            resizeChatInput();
+            updateSendBtnState();
+            syncSkillPickerFromInput();
+        }
+
+        function handleSkillPickerKeydown(e) {
+            if (!skillPickerOpen) return false;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveSkillPickerActive(1);
+                return true;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveSkillPickerActive(-1);
+                return true;
+            }
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                var activeSkill = skillPickerFilteredItems[skillPickerActiveIndex];
+                if (activeSkill) commitSkillPickerSkill(activeSkill);
+                return true;
+            }
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                var tabSkill = skillPickerFilteredItems[skillPickerActiveIndex];
+                if (tabSkill) commitSkillPickerSkill(tabSkill);
+                return true;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeSkillPicker({ removeTrigger: true });
+                inputEl.focus();
+                return true;
+            }
+            return false;
+        }
+
         function renderAttachmentPreview() {
             if (pendingAttachments.length === 0) {
                 attachmentPreview.style.display = 'none';
@@ -674,11 +1029,20 @@
 
         inputEl.addEventListener('input', function () {
             resetInputHistoryNavigation();
+            if (inputEl.value.length > 0) clearPromptSkillDeleteTarget();
             resizeChatInput();
             updateSendBtnState();
+            syncSkillPickerFromInput();
         });
 
         inputEl.addEventListener('keydown', function (e) {
+            if (handleSkillPickerKeydown(e)) return;
+            if (handlePromptSkillBackspace(e)) return;
+            if (e.key === '/' && canOpenSkillPickerFromSlash(e)) {
+                e.preventDefault();
+                insertSkillSlashTrigger();
+                return;
+            }
             if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                 var direction = e.key === 'ArrowUp' ? -1 : 1;
                 if (shouldHandleInputHistoryKey(e, direction)) {
@@ -1860,6 +2224,7 @@
                 resetInputHistoryFromMessages([], false);
                 showEmptyState();
                 inputEl.value = '';
+                clearPromptSkills();
                 resizeChatInput();
                 sendBtn.disabled = true;
                 inputEl.focus();
@@ -2041,6 +2406,7 @@
                     currentSessionUpdatedAt = 0;
                     currentNewestMessageId = 0;
                     resetInputHistoryFromMessages([], false);
+                    clearPromptSkills();
                     updateContextUsage(null);
                     showEmptyState();
                 }
@@ -2052,15 +2418,21 @@
 
         async function sendMessage() {
             var text = inputEl.value.trim();
+            var messageSkills = promptSkills.slice();
             // 收集已上传完成的附件
             var readyAttachments = pendingAttachments.filter(function (a) { return !a.uploading && a.path; });
-            if ((!text && readyAttachments.length === 0) || isTyping || !currentSessionId) return;
+            if ((!text && readyAttachments.length === 0 && messageSkills.length === 0) || isTyping || !currentSessionId) return;
             var requestSessionId = currentSessionId;
 
             // 收集附件信息用于显示（包含 path 以便渲染图片）
             var attachmentInfos = readyAttachments.map(function (a) { return { name: a.name, path: a.path }; });
+            var skillDisplayText = messageSkills.length > 0
+                ? '使用技能：' + messageSkills.map(function (skill) { return skill.name; }).join('、')
+                : '';
+            var displayText = text || skillDisplayText || '[附件]';
 
             inputEl.value = '';
+            clearPromptSkills();
             resizeChatInput();
             sendBtn.disabled = true;
             isTyping = true;
@@ -2071,12 +2443,17 @@
             pendingAttachments = [];
             renderAttachmentPreview();
 
-            appendMessage('user', text || '[附件]', attachmentInfos, null, { createdAt: Date.now() });
+            appendMessage('user', displayText, attachmentInfos, null, { createdAt: Date.now() });
             rememberSentUserMessage(text);
             showTyping();
 
             // 构建请求体
             var body = { content: text };
+            if (messageSkills.length > 0) {
+                body.skills = messageSkills.map(function (skill) {
+                    return { id: skill.id, name: skill.name };
+                });
+            }
             if (modelConfig && modelConfig.currentModel) {
                 body.modelId = modelConfig.currentModel;
             }
@@ -3479,6 +3856,9 @@
         }
 
         document.addEventListener('click', function (e) {
+            if (skillPickerOpen && skillPickerEl && e.target !== inputEl && !skillPickerEl.contains(e.target)) {
+                closeSkillPicker();
+            }
             if (!modelSwitcher.contains(e.target)) {
                 modelSwitcher.classList.remove('open');
                 modelBadge.setAttribute('aria-expanded', 'false');
@@ -3499,6 +3879,11 @@
 
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
+                if (skillPickerOpen) {
+                    closeSkillPicker({ removeTrigger: document.activeElement === inputEl });
+                    if (document.activeElement === inputEl) inputEl.focus();
+                    return;
+                }
                 if (settingsProviderModelComboboxController && settingsProviderModelComboboxController.isOpen()) {
                     settingsProviderModelComboboxController.setOpen(false);
                     settingsProviderModelComboboxController.focusTrigger();
@@ -3547,10 +3932,14 @@
 
         var channelsData = null;
         var skillsData = null;
+        var skillMentionData = null;
+        var skillMentionDataFetchedAt = 0;
+        var SKILL_MENTION_CACHE_TTL = 5 * 1000;
         var currentView = 'chat';
         var weixinLoginPollTimer = null;
 
         function hideAllViews() {
+            closeSkillPicker();
             chatView.style.display = 'none';
             channelView.style.display = 'none';
             skillsView.style.display = 'none';
@@ -4113,9 +4502,30 @@
             try {
                 var res = await fetch('/api/skills');
                 skillsData = await res.json();
+                invalidateSkillMentionData();
             } catch (e) {
                 console.error('Failed to fetch skills:', e);
                 skillsData = { skills: [], sources: [] };
+            }
+        }
+
+        function invalidateSkillMentionData() {
+            skillMentionData = null;
+            skillMentionDataFetchedAt = 0;
+        }
+
+        async function fetchSkillMentionData(force) {
+            if (!force && skillMentionData && Date.now() - skillMentionDataFetchedAt < SKILL_MENTION_CACHE_TTL) {
+                return;
+            }
+            try {
+                var res = await fetch('/api/skills/mentions');
+                skillMentionData = await res.json();
+                skillMentionDataFetchedAt = Date.now();
+            } catch (e) {
+                console.error('Failed to fetch skill mentions:', e);
+                skillMentionData = { skills: [] };
+                skillMentionDataFetchedAt = 0;
             }
         }
 
@@ -4291,6 +4701,7 @@
                     body: JSON.stringify({ enabled: newState }),
                 }).then(function (res) {
                     if (!res.ok) throw new Error('toggle failed');
+                    invalidateSkillMentionData();
                     showSaveStatus(newState ? '已启用: ' + skill.name : '已禁用: ' + skill.name);
                 }).catch(function () {
                     toggle.classList.toggle('on', !newState);
@@ -4328,6 +4739,7 @@
                         setTimeout(function () {
                             card.remove();
                             skillsData.skills = skillsData.skills.filter(function (s) { return s.id !== skill.id; });
+                            invalidateSkillMentionData();
                             var countEl = document.querySelector('.skills-header-count');
                             if (countEl) countEl.textContent = skillsData.skills.length + ' 个技能可用';
                             showSaveStatus('已删除: ' + skill.name);
