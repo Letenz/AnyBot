@@ -175,7 +175,8 @@
             flex-shrink: 0;
         }
 
-        #channels-btn {
+        #channels-btn,
+        #settings-btn {
             width: 100%;
             background: transparent;
             border: 1px solid var(--border);
@@ -194,20 +195,23 @@
             margin-top: 6px;
         }
 
-        #channels-btn:hover {
+        #channels-btn:hover,
+        #settings-btn:hover {
             background: var(--sidebar-hover);
             color: var(--text);
             border-color: rgba(124, 111, 247, 0.25);
         }
 
-        #channels-btn.active {
+        #channels-btn.active,
+        #settings-btn.active {
             background: var(--accent-dim);
             border-color: rgba(124, 111, 247, 0.35);
             color: var(--text);
             box-shadow: 0 0 16px var(--accent-glow);
         }
 
-        #channels-btn svg {
+        #channels-btn svg,
+        #settings-btn svg {
             flex-shrink: 0;
         }
 
@@ -715,35 +719,6 @@
         .history-item-source.default {
             background: rgba(124, 111, 247, 0.12);
             color: var(--accent);
-        }
-
-        .sidebar-footer {
-            padding: 12px 16px;
-            border-top: 1px solid var(--border);
-            display: flex;
-        }
-
-        .sidebar-settings-btn {
-            width: auto;
-            height: 32px;
-            border: none;
-            background: transparent;
-            color: var(--text-muted);
-            display: flex;
-            align-items: center;
-            justify-content: flex-start;
-            gap: 10px;
-            padding: 0;
-            font-family: 'Sora', sans-serif;
-            font-size: 13px;
-            cursor: pointer;
-            transition: color 0.18s ease;
-        }
-
-        .sidebar-settings-btn:hover,
-        .sidebar-settings-btn.active {
-            background: transparent;
-            color: var(--text);
         }
 
         .settings-overlay {
@@ -1460,31 +1435,120 @@
             background: var(--bg);
         }
 
+        .settings-page {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+            z-index: 1;
+        }
+
+        .settings-page-header {
+            padding: 28px 32px 0;
+            flex-shrink: 0;
+        }
+
+        .settings-page-header-top {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 6px;
+        }
+
+        .settings-page-header-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--accent-dim);
+            border: 1px solid rgba(124, 111, 247, 0.2);
+            color: var(--accent);
+            flex-shrink: 0;
+        }
+
+        .settings-page-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .settings-page-subtitle {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
         .settings-view .settings-panel {
-            width: 100%;
+            width: min(1120px, calc(100% - 64px));
             max-width: none;
-            height: 100%;
+            min-height: 0;
+            flex: 1;
+            height: auto;
+            margin: 16px 32px 32px;
             border: none;
-            border-radius: 0;
+            border-radius: 12px;
             box-shadow: none;
+            background: var(--bg);
+            flex-direction: row;
             transform: none;
             transition: none;
         }
 
+        .settings-view .settings-sidebar {
+            width: 176px;
+            padding: 18px 12px;
+            background: var(--sidebar);
+            gap: 0;
+        }
+
+        .settings-view .settings-nav-item {
+            min-height: 40px;
+            border-radius: 8px;
+            padding: 0 14px;
+        }
+
         .settings-view .settings-panel-header {
-            padding-top: 44px;
+            padding: 28px 32px 16px;
+        }
+
+        .settings-view .settings-panel-title {
+            font-size: 18px;
+            line-height: 1.25;
         }
 
         .settings-view .settings-tab-panel {
-            max-width: 860px;
+            max-width: 740px;
         }
 
         .settings-view .settings-panel-actions {
             border-top: none;
+            padding: 0 32px 20px;
         }
 
-        .settings-panel-actions {
-            padding: 16px 40px 24px;
+        .settings-view .settings-panel-body {
+            padding: 8px 32px 28px;
+        }
+
+        .settings-view .settings-section-card > .settings-field {
+            display: grid;
+            grid-template-columns: 96px minmax(0, 1fr);
+            align-items: center;
+            gap: 16px;
+        }
+
+        .settings-view .sandbox-option {
+            min-height: 42px;
+            align-items: center;
+            padding: 8px 10px;
+            text-align: center;
+        }
+
+        .settings-view .sandbox-option-desc {
+            display: none;
         }
 
         @media (max-width: 760px) {
@@ -1493,11 +1557,35 @@
                 padding: 0;
             }
 
+            .settings-page-header {
+                padding: 18px 18px 0;
+            }
+
+            .settings-page-header-icon {
+                width: 38px;
+                height: 38px;
+                border-radius: 10px;
+            }
+
+            .settings-page-title {
+                font-size: 18px;
+            }
+
+            .settings-page-subtitle {
+                font-size: 12px;
+                line-height: 1.4;
+            }
+
             .settings-panel,
             .settings-view .settings-panel {
-                width: 100vw;
-                height: 100vh;
-                border-radius: 0;
+                width: 100%;
+                flex: 1;
+                height: auto;
+                margin: 14px 0 0;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
+                border-radius: 12px 12px 0 0;
                 flex-direction: column;
             }
 
@@ -1532,6 +1620,11 @@
             .settings-panel-actions {
                 padding-left: 18px;
                 padding-right: 18px;
+            }
+
+            .settings-view .settings-section-card > .settings-field {
+                grid-template-columns: 1fr;
+                gap: 8px;
             }
 
             .settings-row {

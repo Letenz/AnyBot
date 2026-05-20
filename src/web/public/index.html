@@ -53,6 +53,13 @@
             </svg>
             频道
         </button>
+        <button id="settings-btn" type="button">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M6.9 1.4h2.2l.35 1.52c.36.13.7.32 1.02.58l1.48-.48 1.1 1.9-1.12 1.04c.04.24.07.48.07.73s-.03.49-.07.73l1.12 1.04-1.1 1.9-1.48-.48c-.31.25-.65.44-1.02.58L9.1 12.6H6.9l-.35-1.52a4.02 4.02 0 0 1-1.02-.58l-1.48.48-1.1-1.9 1.12-1.04A4.3 4.3 0 0 1 4 7.31c0-.25.03-.49.07-.73L2.95 5.54l1.1-1.9 1.48.48c.31-.25.65-.44 1.02-.58L6.9 1.4Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
+                <circle cx="8" cy="7" r="1.9" stroke="currentColor" stroke-width="1.15"/>
+            </svg>
+            设置
+        </button>
     </div>
 
     <div class="sidebar-section">
@@ -89,15 +96,6 @@
     </div>
     <div class="history-list" id="history-list"></div>
 
-    <div class="sidebar-footer">
-        <button id="settings-btn" class="sidebar-settings-btn" type="button">
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M6.9 1.4h2.2l.35 1.52c.36.13.7.32 1.02.58l1.48-.48 1.1 1.9-1.12 1.04c.04.24.07.48.07.73s-.03.49-.07.73l1.12 1.04-1.1 1.9-1.48-.48c-.31.25-.65.44-1.02.58L9.1 12.6H6.9l-.35-1.52a4.02 4.02 0 0 1-1.02-.58l-1.48.48-1.1-1.9 1.12-1.04A4.3 4.3 0 0 1 4 7.31c0-.25.03-.49.07-.73L2.95 5.54l1.1-1.9 1.48.48c.31-.25.65-.44 1.02-.58L6.9 1.4Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
-                <circle cx="8" cy="7" r="1.9" stroke="currentColor" stroke-width="1.15"/>
-            </svg>
-            设置
-        </button>
-    </div>
 </aside>
 
 <main id="main">
@@ -162,153 +160,169 @@
     <div id="channel-view" style="display:none;"></div>
     <div id="skills-view" style="display:none;"></div>
     <div id="settings-view" class="settings-view" style="display:none;">
-        <section class="settings-panel" role="region" aria-labelledby="settings-title">
-        <aside class="settings-sidebar" aria-label="设置分组">
-            <div class="settings-nav" role="tablist" aria-label="设置分组">
-                <button class="settings-nav-item active" type="button" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
-                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="network">网络</button>
-                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="provider">提供商</button>
-                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="workspace">工作区</button>
-                <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="privacy">隐私与日志</button>
-            </div>
-        </aside>
-        <div class="settings-main">
-            <div class="settings-panel-header">
-                <div>
-                    <div class="settings-panel-title" id="settings-title">常规</div>
-                    <div class="settings-panel-subtitle" id="settings-subtitle">应用外观、语言和启动行为</div>
+        <div class="settings-page">
+            <div class="settings-page-header">
+                <div class="settings-page-header-top">
+                    <div class="settings-page-header-icon">
+                        <svg width="22" height="22" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <path d="M6.9 1.4h2.2l.35 1.52c.36.13.7.32 1.02.58l1.48-.48 1.1 1.9-1.12 1.04c.04.24.07.48.07.73s-.03.49-.07.73l1.12 1.04-1.1 1.9-1.48-.48c-.31.25-.65.44-1.02.58L9.1 12.6H6.9l-.35-1.52a4.02 4.02 0 0 1-1.02-.58l-1.48.48-1.1-1.9 1.12-1.04A4.3 4.3 0 0 1 4 7.31c0-.25.03-.49.07-.73L2.95 5.54l1.1-1.9 1.48.48c.31-.25.65-.44 1.02-.58L6.9 1.4Z" stroke="currentColor" stroke-width="1.15" stroke-linejoin="round"/>
+                            <circle cx="8" cy="7" r="1.9" stroke="currentColor" stroke-width="1.15"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="settings-page-title">设置</div>
+                        <div class="settings-page-subtitle">管理 AnyBot 的外观、模型、权限、工作区和运行日志</div>
+                    </div>
                 </div>
             </div>
-            <div class="settings-panel-body">
-                <section class="settings-tab-panel active" data-settings-panel="general" role="tabpanel">
-                    <div class="settings-section-card">
-                        <div class="settings-section-title">外观</div>
-                        <div class="settings-field">
-                            <span class="settings-field-label" id="settings-theme-label">主题</span>
-                            <div class="theme-segmented" id="settings-theme-group" role="radiogroup" aria-labelledby="settings-theme-label">
-                                <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="light">浅色</button>
-                                <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="dark">深色</button>
-                                <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="system">自动</button>
-                            </div>
+            <section class="settings-panel" role="region" aria-labelledby="settings-title">
+                <aside class="settings-sidebar" aria-label="设置分组">
+                    <div class="settings-nav" role="tablist" aria-label="设置分组">
+                        <button class="settings-nav-item active" type="button" role="tab" aria-selected="true" data-settings-tab="general">常规</button>
+                        <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="network">网络</button>
+                        <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="provider">提供商</button>
+                        <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="workspace">工作区</button>
+                        <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="privacy">隐私与日志</button>
+                    </div>
+                </aside>
+                <div class="settings-main">
+                    <div class="settings-panel-header">
+                        <div>
+                            <div class="settings-panel-title" id="settings-title">常规</div>
+                            <div class="settings-panel-subtitle" id="settings-subtitle">应用外观、语言和启动行为</div>
                         </div>
                     </div>
-                    <div class="settings-section-card">
-                        <div class="settings-section-title">权限</div>
-                        <div class="settings-field">
-                            <span class="settings-field-label" id="settings-sandbox-label">默认权限</span>
-                            <div class="sandbox-segmented" id="settings-sandbox-group" role="radiogroup" aria-labelledby="settings-sandbox-label"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="settings-tab-panel" data-settings-panel="provider" role="tabpanel">
-                    <div class="settings-section-card">
-                        <div class="settings-section-title">提供商</div>
-                        <div class="settings-field">
-                            <span class="settings-field-label" id="settings-provider-label">默认提供商</span>
-                            <div class="settings-combobox" id="settings-provider-combobox">
-                                <button class="settings-combobox-trigger" id="settings-provider-trigger" type="button"
-                                        aria-haspopup="listbox" aria-expanded="false"
-                                        aria-labelledby="settings-provider-label settings-provider-current">
-                                    <span class="settings-combobox-value" id="settings-provider-current">加载中…</span>
-                                    <svg class="settings-combobox-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                        <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-                                    </svg>
-                                </button>
-                                <div class="settings-combobox-menu" id="settings-provider-menu" role="listbox" aria-labelledby="settings-provider-label"></div>
-                            </div>
-                            <select class="settings-select" id="settings-provider-select" aria-hidden="true" tabindex="-1"></select>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="settings-tab-panel" data-settings-panel="network" role="tabpanel">
-                    <div class="settings-section-card">
-                        <div class="settings-section-title">代理</div>
-                        <div class="settings-network-card">
-                            <div class="proxy-toggle-row">
-                                <div>
-                                    <div class="proxy-toggle-label">启用代理</div>
-                                    <div class="proxy-toggle-hint">开启后所有出站请求都会通过代理服务器</div>
-                                </div>
-                                <label class="proxy-toggle">
-                                    <input type="checkbox" id="proxy-enabled">
-                                    <span class="proxy-toggle-slider"></span>
-                                </label>
-                            </div>
-                            <div class="settings-network-grid">
-                                <div class="proxy-field">
-                                    <label class="proxy-field-label" for="proxy-protocol">协议</label>
-                                    <select class="proxy-field-select" id="proxy-protocol">
-                                        <option value="http">HTTP</option>
-                                        <option value="socks5">SOCKS5</option>
-                                    </select>
-                                </div>
-                                <div class="proxy-field">
-                                    <label class="proxy-field-label" for="proxy-host">地址</label>
-                                    <input class="proxy-field-input" id="proxy-host" type="text" placeholder="127.0.0.1" spellcheck="false">
-                                </div>
-                                <div class="proxy-field port">
-                                    <label class="proxy-field-label" for="proxy-port">端口</label>
-                                    <input class="proxy-field-input" id="proxy-port" type="number" placeholder="7890" min="1" max="65535">
-                                </div>
-                            </div>
-                            <button class="proxy-auth-toggle" id="proxy-auth-toggle" type="button">认证（可选）</button>
-                            <div class="proxy-auth-fields" id="proxy-auth-fields">
-                                <div class="settings-network-grid auth">
-                                    <div class="proxy-field">
-                                        <label class="proxy-field-label" for="proxy-username">用户名</label>
-                                        <input class="proxy-field-input" id="proxy-username" type="text" placeholder="留空则不使用认证" spellcheck="false">
-                                    </div>
-                                    <div class="proxy-field">
-                                        <label class="proxy-field-label" for="proxy-password">密码</label>
-                                        <input class="proxy-field-input" id="proxy-password" type="password" placeholder="留空则不使用认证">
+                    <div class="settings-panel-body">
+                        <section class="settings-tab-panel active" data-settings-panel="general" role="tabpanel">
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">外观</div>
+                                <div class="settings-field">
+                                    <span class="settings-field-label" id="settings-theme-label">主题</span>
+                                    <div class="theme-segmented" id="settings-theme-group" role="radiogroup" aria-labelledby="settings-theme-label">
+                                        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="light">浅色</button>
+                                        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="dark">深色</button>
+                                        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="system">自动</button>
                                     </div>
                                 </div>
                             </div>
-                            <div class="proxy-actions">
-                                <button class="proxy-save-btn" id="proxy-save-btn" type="button">保存</button>
-                                <button class="proxy-test-btn" id="proxy-test-btn" type="button">测试连接</button>
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">权限</div>
+                                <div class="settings-field">
+                                    <span class="settings-field-label" id="settings-sandbox-label">默认权限</span>
+                                    <div class="sandbox-segmented" id="settings-sandbox-group" role="radiogroup" aria-labelledby="settings-sandbox-label"></div>
+                                </div>
                             </div>
-                            <div class="proxy-status" id="proxy-status"></div>
-                        </div>
-                    </div>
-                    <div class="settings-section-card">
-                        <div class="settings-section-title">参考端口</div>
-                        <div class="settings-port-list">
-                            <div><span>Clash / ClashX</span><code>HTTP 7890</code><code>SOCKS5 7891</code></div>
-                            <div><span>V2rayN</span><code>HTTP 10809</code><code>SOCKS5 10808</code></div>
-                            <div><span>Shadowsocks</span><code>HTTP 1082</code></div>
-                            <div><span>Surge</span><code>HTTP 6152</code><code>SOCKS5 6153</code></div>
-                        </div>
-                    </div>
-                </section>
+                        </section>
 
-                <section class="settings-tab-panel" data-settings-panel="workspace" role="tabpanel">
-                    <div class="settings-section-card">
-                        <div class="settings-section-title">默认工作目录</div>
-                        <div class="settings-path-row">
-                            <input class="settings-inline-input" id="settings-default-workdir" type="text" spellcheck="false">
-                            <button class="settings-secondary-btn compact" id="settings-workdir-pick-btn" type="button">选择</button>
-                        </div>
-                    </div>
-                </section>
+                        <section class="settings-tab-panel" data-settings-panel="provider" role="tabpanel">
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">提供商</div>
+                                <div class="settings-field">
+                                    <span class="settings-field-label" id="settings-provider-label">默认提供商</span>
+                                    <div class="settings-combobox" id="settings-provider-combobox">
+                                        <button class="settings-combobox-trigger" id="settings-provider-trigger" type="button"
+                                                aria-haspopup="listbox" aria-expanded="false"
+                                                aria-labelledby="settings-provider-label settings-provider-current">
+                                            <span class="settings-combobox-value" id="settings-provider-current">加载中…</span>
+                                            <svg class="settings-combobox-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                                <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </button>
+                                        <div class="settings-combobox-menu" id="settings-provider-menu" role="listbox" aria-labelledby="settings-provider-label"></div>
+                                    </div>
+                                    <select class="settings-select" id="settings-provider-select" aria-hidden="true" tabindex="-1"></select>
+                                </div>
+                            </div>
+                        </section>
 
-                <section class="settings-tab-panel" data-settings-panel="privacy" role="tabpanel">
-                    <div class="settings-section-card">
-                        <div class="settings-section-title">日志</div>
-                        <div class="settings-button-row">
-                            <button class="settings-secondary-btn compact" id="settings-open-logs-btn" type="button">打开日志目录</button>
-                            <button class="settings-danger-btn compact" id="settings-clear-logs-btn" type="button">清空日志</button>
-                        </div>
+                        <section class="settings-tab-panel" data-settings-panel="network" role="tabpanel">
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">代理</div>
+                                <div class="settings-network-card">
+                                    <div class="proxy-toggle-row">
+                                        <div>
+                                            <div class="proxy-toggle-label">启用代理</div>
+                                            <div class="proxy-toggle-hint">开启后所有出站请求都会通过代理服务器</div>
+                                        </div>
+                                        <label class="proxy-toggle">
+                                            <input type="checkbox" id="proxy-enabled">
+                                            <span class="proxy-toggle-slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="settings-network-grid">
+                                        <div class="proxy-field">
+                                            <label class="proxy-field-label" for="proxy-protocol">协议</label>
+                                            <select class="proxy-field-select" id="proxy-protocol">
+                                                <option value="http">HTTP</option>
+                                                <option value="socks5">SOCKS5</option>
+                                            </select>
+                                        </div>
+                                        <div class="proxy-field">
+                                            <label class="proxy-field-label" for="proxy-host">地址</label>
+                                            <input class="proxy-field-input" id="proxy-host" type="text" placeholder="127.0.0.1" spellcheck="false">
+                                        </div>
+                                        <div class="proxy-field port">
+                                            <label class="proxy-field-label" for="proxy-port">端口</label>
+                                            <input class="proxy-field-input" id="proxy-port" type="number" placeholder="7890" min="1" max="65535">
+                                        </div>
+                                    </div>
+                                    <button class="proxy-auth-toggle" id="proxy-auth-toggle" type="button">认证（可选）</button>
+                                    <div class="proxy-auth-fields" id="proxy-auth-fields">
+                                        <div class="settings-network-grid auth">
+                                            <div class="proxy-field">
+                                                <label class="proxy-field-label" for="proxy-username">用户名</label>
+                                                <input class="proxy-field-input" id="proxy-username" type="text" placeholder="留空则不使用认证" spellcheck="false">
+                                            </div>
+                                            <div class="proxy-field">
+                                                <label class="proxy-field-label" for="proxy-password">密码</label>
+                                                <input class="proxy-field-input" id="proxy-password" type="password" placeholder="留空则不使用认证">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="proxy-actions">
+                                        <button class="proxy-save-btn" id="proxy-save-btn" type="button">保存</button>
+                                        <button class="proxy-test-btn" id="proxy-test-btn" type="button">测试连接</button>
+                                    </div>
+                                    <div class="proxy-status" id="proxy-status"></div>
+                                </div>
+                            </div>
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">参考端口</div>
+                                <div class="settings-port-list">
+                                    <div><span>Clash / ClashX</span><code>HTTP 7890</code><code>SOCKS5 7891</code></div>
+                                    <div><span>V2rayN</span><code>HTTP 10809</code><code>SOCKS5 10808</code></div>
+                                    <div><span>Shadowsocks</span><code>HTTP 1082</code></div>
+                                    <div><span>Surge</span><code>HTTP 6152</code><code>SOCKS5 6153</code></div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-tab-panel" data-settings-panel="workspace" role="tabpanel">
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">默认工作目录</div>
+                                <div class="settings-path-row">
+                                    <input class="settings-inline-input" id="settings-default-workdir" type="text" spellcheck="false">
+                                    <button class="settings-secondary-btn compact" id="settings-workdir-pick-btn" type="button">选择</button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-tab-panel" data-settings-panel="privacy" role="tabpanel">
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">日志</div>
+                                <div class="settings-button-row">
+                                    <button class="settings-secondary-btn compact" id="settings-open-logs-btn" type="button">打开日志目录</button>
+                                    <button class="settings-danger-btn compact" id="settings-clear-logs-btn" type="button">清空日志</button>
+                                </div>
+                            </div>
+                        </section>
                     </div>
-                </section>
-            </div>
-            <div class="settings-panel-actions">
-                <span class="settings-save-status" id="settings-save-status"></span>
-            </div>
+                    <div class="settings-panel-actions">
+                        <span class="settings-save-status" id="settings-save-status"></span>
+                    </div>
+                </div>
+            </section>
         </div>
-        </section>
     </div>
 </main>
 
