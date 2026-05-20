@@ -352,6 +352,18 @@ function getSessionWorkdir(session: Pick<db.ChatSession, "projectId">): string {
   return normalizeProjectPath(project.path);
 }
 
+function resolveRunModel(provider: IProvider, requestedModelId?: string): string {
+  const fallback = getModelForProvider(provider.type);
+  const modelId = requestedModelId?.trim();
+  if (!modelId) return fallback;
+
+  const valid = provider.listModels().some((model) => model.id === modelId);
+  if (!valid) {
+    throw new Error(`不支持的模型: ${modelId}`);
+  }
+  return modelId;
+}
+
 // multer 配置：保留原始扩展名
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -1071,9 +1083,10 @@ export function chatRouter(): Router {
       return;
     }
 
-    const { content, attachments } = req.body as {
+    const { content, attachments, modelId } = req.body as {
       content?: string;
       attachments?: { path: string; name: string }[];
+      modelId?: string;
     };
     if (!content?.trim() && (!attachments || attachments.length === 0)) {
       res.status(400).json({ error: "消息不能为空" });
@@ -1084,6 +1097,13 @@ export function chatRouter(): Router {
     const provider = getSessionProvider(session);
     if (!isStreamingProvider(provider)) {
       res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
+      return;
+    }
+    let selectedModel: string;
+    try {
+      selectedModel = resolveRunModel(provider, modelId);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "模型不可用" });
       return;
     }
 
@@ -1166,6 +1186,7 @@ export function chatRouter(): Router {
           sessionId: session.id,
           providerSessionId: session.sessionId,
           provider: provider.type,
+          model: selectedModel,
           workdir: sessionWorkdir,
           userTextChars: userText.length,
           imageCount: imagePaths.length,
@@ -1175,7 +1196,7 @@ export function chatRouter(): Router {
         const result = await provider.runWithEvents({
           workdir: sessionWorkdir,
           sandbox: getSandbox(),
-          model: getModelForProvider(provider.type),
+          model: selectedModel,
           prompt,
           imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
           sessionId: session.sessionId || undefined,
@@ -1286,9 +1307,10 @@ export function chatRouter(): Router {
       return;
     }
 
-    const { content, attachments } = req.body as {
+    const { content, attachments, modelId } = req.body as {
       content?: string;
       attachments?: { path: string; name: string }[];
+      modelId?: string;
     };
     if (!content?.trim() && (!attachments || attachments.length === 0)) {
       res.status(400).json({ error: "消息不能为空" });
@@ -1300,6 +1322,16 @@ export function chatRouter(): Router {
       sessionWorkdir = getSessionWorkdir(session);
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "项目目录不可用" });
+      return;
+    }
+
+    bindSessionProvider(session);
+    const provider = getSessionProvider(session);
+    let selectedModel: string;
+    try {
+      selectedModel = resolveRunModel(provider, modelId);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "模型不可用" });
       return;
     }
 
@@ -1338,8 +1370,6 @@ export function chatRouter(): Router {
       session.title = generateTitle(content?.trim() || "文件分析");
     }
 
-    bindSessionProvider(session);
-
     const prompt = session.sessionId
       ? buildResumePrompt(userText, session.source || "web")
       : buildFirstTurnPrompt(userText, session.source || "web", {
@@ -1349,11 +1379,11 @@ export function chatRouter(): Router {
         });
 
     try {
-      const provider = getSessionProvider(session);
       logger.info("web.chat.start", {
         sessionId: session.id,
         providerSessionId: session.sessionId,
         provider: provider.type,
+        model: selectedModel,
         workdir: sessionWorkdir,
         userTextChars: userText.length,
         imageCount: imagePaths.length,
@@ -1364,7 +1394,7 @@ export function chatRouter(): Router {
       const result = await provider.run({
         workdir: sessionWorkdir,
         sandbox: getSandbox(),
-        model: getModelForProvider(provider.type),
+        model: selectedModel,
         prompt,
         imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
         sessionId: session.sessionId || undefined,

@@ -66,12 +66,22 @@
         const settingsProviderTrigger = document.getElementById('settings-provider-trigger');
         const settingsProviderCurrent = document.getElementById('settings-provider-current');
         const settingsProviderMenu = document.getElementById('settings-provider-menu');
+        const settingsThemeCombobox = document.getElementById('settings-theme-combobox');
+        const settingsThemeTrigger = document.getElementById('settings-theme-trigger');
+        const settingsThemeCurrent = document.getElementById('settings-theme-current');
         const settingsThemeGroup = document.getElementById('settings-theme-group');
+        const settingsSandboxCombobox = document.getElementById('settings-sandbox-combobox');
+        const settingsSandboxTrigger = document.getElementById('settings-sandbox-trigger');
+        const settingsSandboxCurrent = document.getElementById('settings-sandbox-current');
         const settingsSandboxGroup = document.getElementById('settings-sandbox-group');
         const settingsLanguageSelect = document.getElementById('settings-language-select');
         const settingsOpenLogin = document.getElementById('settings-open-login');
         const settingsOpenWindow = document.getElementById('settings-open-window');
         const settingsWebPort = document.getElementById('settings-web-port');
+        const settingsProviderModelCombobox = document.getElementById('settings-provider-model-combobox');
+        const settingsProviderModelTrigger = document.getElementById('settings-provider-model-trigger');
+        const settingsProviderModelCurrent = document.getElementById('settings-provider-model-current');
+        const settingsProviderModelMenu = document.getElementById('settings-provider-model-menu');
         const settingsProviderModelSelect = document.getElementById('settings-provider-model-select');
         const settingsProviderStatus = document.getElementById('settings-provider-status');
         const settingsProviderCompatToggleFields = document.getElementById('settings-provider-compat-toggle-fields');
@@ -115,6 +125,8 @@
         let settingsModelConfig = null;
         let selectedSandbox = null;
         let activeSettingsTab = 'general';
+        let sessionModelSelections = {};
+        let settingsProviderModelComboboxController = null;
         let latestContextUsage = null;
         let activeStreamSessionId = null;
         let activeStreamAbortController = null;
@@ -127,6 +139,11 @@
         const SESSION_MESSAGE_PAGE_SIZE = 40;
         const LARGE_MESSAGE_PREVIEW_CHARS = 20000;
         const THEME_STORAGE_KEY = 'webuiTheme';
+        const THEME_OPTIONS = [
+            {id: 'light', name: '浅色'},
+            {id: 'dark', name: '深色'},
+            {id: 'system', name: '自动'},
+        ];
         const HIGHLIGHT_DARK_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css';
         const HIGHLIGHT_LIGHT_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
         const SIDEBAR_REFRESH_INTERVAL_MS = 5000;
@@ -170,13 +187,7 @@
                 highlightTheme.href = effectiveTheme === 'light' ? HIGHLIGHT_LIGHT_CSS : HIGHLIGHT_DARK_CSS;
             }
 
-            if (settingsThemeGroup) {
-                Array.prototype.forEach.call(settingsThemeGroup.querySelectorAll('.theme-option'), function (button) {
-                    var isActive = button.dataset.themeValue === currentThemeSetting;
-                    button.classList.toggle('active', isActive);
-                    button.setAttribute('aria-checked', isActive ? 'true' : 'false');
-                });
-            }
+            updateThemeDisplay();
 
             if (latestContextUsage) updateContextUsage(latestContextUsage);
         }
@@ -186,15 +197,133 @@
             applyTheme(setting);
         }
 
+        function getThemeLabel(theme) {
+            var option = THEME_OPTIONS.find(function (item) {
+                return item.id === theme;
+            });
+            return option ? option.name : '自动';
+        }
+
+        function renderThemeOptions() {
+            if (!settingsThemeGroup) return;
+            settingsThemeGroup.innerHTML = '';
+            THEME_OPTIONS.forEach(function (theme) {
+                var item = document.createElement('button');
+                item.className = 'settings-combobox-option theme-option';
+                item.type = 'button';
+                item.setAttribute('role', 'option');
+                item.dataset.themeValue = theme.id;
+                item.dataset.themeName = theme.name;
+                item.innerHTML = buildSettingsComboboxOptionHtml(theme.id === currentThemeSetting, theme.name);
+                item.addEventListener('click', async function (e) {
+                    e.stopPropagation();
+                    setTheme(theme.id);
+                    setSettingsThemeMenuOpen(false);
+                    if (settingsThemeTrigger) settingsThemeTrigger.focus();
+                    await persistAppSettingsPatch({general: {theme: theme.id}}, '已保存');
+                });
+                item.addEventListener('keydown', handleSettingsThemeOptionKeydown);
+                settingsThemeGroup.appendChild(item);
+            });
+            updateThemeDisplay();
+        }
+
+        function updateThemeDisplay() {
+            if (settingsThemeCurrent) settingsThemeCurrent.textContent = getThemeLabel(currentThemeSetting);
+            if (!settingsThemeGroup) return;
+            Array.prototype.forEach.call(settingsThemeGroup.querySelectorAll('.theme-option'), function (item) {
+                var isActive = item.dataset.themeValue === currentThemeSetting;
+                item.classList.toggle('active', isActive);
+                item.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                item.innerHTML = buildSettingsComboboxOptionHtml(isActive, item.dataset.themeName || '');
+            });
+        }
+
+        function getSettingsThemeOptions() {
+            if (!settingsThemeGroup) return [];
+            return Array.prototype.slice.call(settingsThemeGroup.querySelectorAll('.theme-option'));
+        }
+
+        function setSettingsThemeMenuOpen(isOpen) {
+            if (!settingsThemeCombobox || !settingsThemeTrigger) return;
+            if (isOpen) {
+                setSettingsSandboxMenuOpen(false);
+                setSettingsProviderMenuOpen(false);
+                if (settingsProviderModelComboboxController) settingsProviderModelComboboxController.setOpen(false);
+            }
+            settingsThemeCombobox.classList.toggle('open', isOpen);
+            settingsThemeTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            if (isOpen) {
+                var active = settingsThemeGroup && settingsThemeGroup.querySelector('.theme-option.active');
+                requestAnimationFrame(function () {
+                    (active || getSettingsThemeOptions()[0] || settingsThemeTrigger).focus();
+                });
+            }
+        }
+
+        function moveSettingsThemeFocus(delta) {
+            var options = getSettingsThemeOptions();
+            if (!options.length) return;
+            var currentIndex = options.indexOf(document.activeElement);
+            var nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + options.length) % options.length;
+            options[nextIndex].focus();
+        }
+
+        function handleSettingsThemeOptionKeydown(e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveSettingsThemeFocus(1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveSettingsThemeFocus(-1);
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                var first = getSettingsThemeOptions()[0];
+                if (first) first.focus();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                var options = getSettingsThemeOptions();
+                var last = options[options.length - 1];
+                if (last) last.focus();
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.currentTarget.click();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setSettingsThemeMenuOpen(false);
+                if (settingsThemeTrigger) settingsThemeTrigger.focus();
+            }
+        }
+
+        renderThemeOptions();
         applyTheme(currentThemeSetting);
+
+        if (settingsThemeTrigger) {
+            settingsThemeTrigger.addEventListener('click', function (e) {
+                e.stopPropagation();
+                setSettingsThemeMenuOpen(!settingsThemeCombobox.classList.contains('open'));
+            });
+            settingsThemeTrigger.addEventListener('keydown', function (e) {
+                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSettingsThemeMenuOpen(true);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSettingsThemeMenuOpen(true);
+                    requestAnimationFrame(function () {
+                        var options = getSettingsThemeOptions();
+                        var last = options[options.length - 1];
+                        if (last) last.focus();
+                    });
+                } else if (e.key === 'Escape') {
+                    setSettingsThemeMenuOpen(false);
+                }
+            });
+        }
 
         if (settingsThemeGroup) {
             settingsThemeGroup.addEventListener('click', function (e) {
-                var button = e.target.closest('.theme-option');
-                if (!button || !settingsThemeGroup.contains(button)) return;
-                var theme = button.dataset.themeValue;
-                setTheme(theme);
-                persistAppSettingsPatch({general: {theme: theme}}, '已保存');
+                e.stopPropagation();
             });
         }
 
@@ -1311,11 +1440,13 @@
                 !document.querySelector('#messages .message-row');
             if (canReuseEmptySession) {
                 activeProjectId = targetProjectId;
+                delete sessionModelSelections[currentSessionId];
                 revealSessionContainer(targetProjectId);
                 renderHistory();
                 renderProjects();
                 updateSidebarSelection();
                 revealActiveSessionInSidebar();
+                await fetchModelConfig(currentSessionProvider);
                 inputEl.focus();
                 return;
             }
@@ -1541,6 +1672,9 @@
 
             // 构建请求体
             var body = { content: text };
+            if (modelConfig && modelConfig.currentModel) {
+                body.modelId = modelConfig.currentModel;
+            }
             if (readyAttachments.length > 0) {
                 body.attachments = readyAttachments.map(function (a) {
                     return { path: a.path, name: a.name };
@@ -1632,10 +1766,6 @@
             updateSendBtnState();
         }
 
-        function getModelConfigProvider() {
-            return (modelConfig && modelConfig.provider) || currentSessionProvider || (providerData && providerData.current) || '';
-        }
-
         function updateModelBadgeLabel() {
             if (!modelConfig) return;
             currentModelNameEl.textContent = modelConfig.currentModel;
@@ -1648,6 +1778,10 @@
                 var url = '/api/model-config' + (targetProvider ? '?provider=' + encodeURIComponent(targetProvider) : '');
                 var res = await fetch(url);
                 modelConfig = await res.json();
+                var sessionModel = currentSessionId ? sessionModelSelections[currentSessionId] : null;
+                if (sessionModel && modelConfig.models && modelConfig.models.some(function (model) { return model.id === sessionModel; })) {
+                    modelConfig.currentModel = sessionModel;
+                }
                 updateModelBadgeLabel();
                 renderModelDropdown();
             } catch (e) {
@@ -1678,33 +1812,22 @@
             });
         }
 
-        async function switchModel(modelId) {
+        function switchModel(modelId) {
             if (!modelConfig || modelId === modelConfig.currentModel) {
                 modelSwitcher.classList.remove('open');
                 modelBadge.setAttribute('aria-expanded', 'false');
                 return;
             }
-            try {
-                var res = await fetch('/api/model-config', {
-                    method: 'PUT',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({modelId: modelId, provider: getModelConfigProvider()}),
-                });
-                if (!res.ok) {
-                    var err = await res.json().catch(function () {
-                        return {};
-                    });
-                    showError(err.error || '切换模型失败');
-                    return;
-                }
-                modelConfig = await res.json();
-                updateModelBadgeLabel();
-                renderModelDropdown();
-                modelSwitcher.classList.remove('open');
-                modelBadge.setAttribute('aria-expanded', 'false');
-            } catch (e) {
+            if (!modelConfig.models || !modelConfig.models.some(function (model) { return model.id === modelId; })) {
                 showError('切换模型失败');
+                return;
             }
+            modelConfig.currentModel = modelId;
+            if (currentSessionId) sessionModelSelections[currentSessionId] = modelId;
+            updateModelBadgeLabel();
+            renderModelDropdown();
+            modelSwitcher.classList.remove('open');
+            modelBadge.setAttribute('aria-expanded', 'false');
         }
 
         modelBadge.addEventListener('click', function (e) {
@@ -1867,16 +1990,29 @@
             settingsProviderModelSelect.innerHTML = '';
             if (!settingsModelConfig || !Array.isArray(settingsModelConfig.models)) {
                 settingsProviderModelSelect.disabled = true;
+                if (settingsProviderModelComboboxController) {
+                    settingsProviderModelComboboxController.render([], '');
+                    settingsProviderModelComboboxController.setDisabled(true);
+                }
                 return;
             }
-            settingsProviderModelSelect.disabled = false;
+            settingsProviderModelSelect.disabled = settingsModelConfig.models.length === 0;
             settingsModelConfig.models.forEach(function (model) {
                 var option = document.createElement('option');
                 option.value = model.id;
                 option.textContent = model.name || model.id;
                 settingsProviderModelSelect.appendChild(option);
             });
-            settingsProviderModelSelect.value = settingsModelConfig.currentModel || settingsProviderModelSelect.value;
+            settingsProviderModelSelect.value = settingsModelConfig.currentModel || (settingsModelConfig.models[0] && settingsModelConfig.models[0].id) || '';
+            if (settingsProviderModelComboboxController) {
+                settingsProviderModelComboboxController.render(settingsModelConfig.models.map(function (model) {
+                    return {
+                        value: model.id,
+                        label: model.name || model.id,
+                    };
+                }), settingsProviderModelSelect.value);
+                settingsProviderModelComboboxController.setDisabled(settingsModelConfig.models.length === 0);
+            }
         }
 
         function getProviderSettings(providerType) {
@@ -1915,7 +2051,7 @@
             var providerModelField = settingsProviderModelSelect && settingsProviderModelSelect.closest('.settings-field');
             var providerActions = settingsSaveBtn && settingsSaveBtn.closest('.settings-button-row');
             if (providerModelField) {
-                providerModelField.style.display = showProviderFields && definition.showModelSelect ? '' : 'none';
+                providerModelField.style.display = definition && definition.showModelSelect ? '' : 'none';
             }
             if (providerActions) providerActions.style.display = showProviderFields ? '' : 'none';
             if (settingsProviderCompatToggleFields) {
@@ -1931,7 +2067,7 @@
                 settingsProviderExtraFields.style.display = showProviderFields ? '' : 'none';
                 settingsProviderExtraFields.innerHTML = showProviderFields ? definition.buildFields(cfg) : '';
             }
-            if (showProviderFields && definition.showModelSelect) fetchSettingsModelConfig(provider.type);
+            if (definition && definition.showModelSelect) fetchSettingsModelConfig(provider.type);
         }
 
         function buildClaudeCodeCompatToggle(cfg) {
@@ -2078,6 +2214,35 @@
             });
         }
 
+        if (settingsSandboxTrigger) {
+            settingsSandboxTrigger.addEventListener('click', function (e) {
+                e.stopPropagation();
+                setSettingsSandboxMenuOpen(!settingsSandboxCombobox.classList.contains('open'));
+            });
+            settingsSandboxTrigger.addEventListener('keydown', function (e) {
+                if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSettingsSandboxMenuOpen(true);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSettingsSandboxMenuOpen(true);
+                    requestAnimationFrame(function () {
+                        var options = getSettingsSandboxOptions();
+                        var last = options[options.length - 1];
+                        if (last) last.focus();
+                    });
+                } else if (e.key === 'Escape') {
+                    setSettingsSandboxMenuOpen(false);
+                }
+            });
+        }
+
+        if (settingsSandboxGroup) {
+            settingsSandboxGroup.addEventListener('click', function (e) {
+                e.stopPropagation();
+            });
+        }
+
         async function fetchProviders() {
             try {
                 var res = await fetch('/api/providers');
@@ -2104,24 +2269,36 @@
             if (!settingsSandboxGroup || !sandboxConfig) return;
             settingsSandboxGroup.innerHTML = '';
             sandboxConfig.modes.forEach(function (mode) {
-                var button = document.createElement('button');
+                var option = document.createElement('button');
                 var isActive = mode.id === selectedSandbox;
-                button.className = 'sandbox-option' + (isActive ? ' active' : '');
-                button.type = 'button';
-                button.setAttribute('role', 'radio');
-                button.setAttribute('aria-checked', isActive ? 'true' : 'false');
-                button.dataset.sandboxValue = mode.id;
-                button.innerHTML =
+                option.className = 'settings-combobox-option sandbox-option' + (isActive ? ' active' : '');
+                option.type = 'button';
+                option.setAttribute('role', 'option');
+                option.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                option.dataset.sandboxValue = mode.id;
+                option.dataset.sandboxName = mode.name;
+                option.dataset.sandboxDescription = mode.description;
+                option.innerHTML =
+                    (isActive
+                        ? '<svg class="settings-combobox-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                        : '<span class="settings-combobox-check-placeholder"></span>') +
+                    '<span class="sandbox-option-copy">' +
                     '<span class="sandbox-option-name">' + escapeHtml(mode.name) + '</span>' +
-                    '<span class="sandbox-option-desc">' + escapeHtml(mode.description) + '</span>';
-                button.addEventListener('click', async function () {
+                    '<span class="sandbox-option-desc">' + escapeHtml(mode.description) + '</span>' +
+                    '</span>';
+                option.addEventListener('click', async function (e) {
+                    e.stopPropagation();
                     if (setSettingsSandboxValue(mode.id)) {
+                        setSettingsSandboxMenuOpen(false);
+                        if (settingsSandboxTrigger) settingsSandboxTrigger.focus();
                         await persistSandboxConfig();
                         showSettingsStatus('已保存');
                     }
                 });
-                settingsSandboxGroup.appendChild(button);
+                option.addEventListener('keydown', handleSettingsSandboxOptionKeydown);
+                settingsSandboxGroup.appendChild(option);
             });
+            updateSandboxDisplay();
         }
 
         function setSettingsSandboxValue(sandbox) {
@@ -2134,12 +2311,87 @@
                 return false;
             }
             selectedSandbox = sandbox;
-            Array.prototype.forEach.call(settingsSandboxGroup.querySelectorAll('.sandbox-option'), function (button) {
-                var isActive = button.dataset.sandboxValue === selectedSandbox;
-                button.classList.toggle('active', isActive);
-                button.setAttribute('aria-checked', isActive ? 'true' : 'false');
-            });
+            updateSandboxDisplay();
             return true;
+        }
+
+        function updateSandboxDisplay() {
+            if (!settingsSandboxGroup || !sandboxConfig) return;
+            var selectedMode = sandboxConfig.modes.find(function (mode) {
+                return mode.id === selectedSandbox;
+            });
+            if (settingsSandboxCurrent) {
+                settingsSandboxCurrent.textContent = selectedMode ? selectedMode.name : '请选择权限';
+            }
+            Array.prototype.forEach.call(settingsSandboxGroup.querySelectorAll('.sandbox-option'), function (option) {
+                var isActive = option.dataset.sandboxValue === selectedSandbox;
+                option.classList.toggle('active', isActive);
+                option.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                option.innerHTML =
+                    (isActive
+                        ? '<svg class="settings-combobox-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                        : '<span class="settings-combobox-check-placeholder"></span>') +
+                    '<span class="sandbox-option-copy">' +
+                    '<span class="sandbox-option-name">' + escapeHtml(option.dataset.sandboxName || '') + '</span>' +
+                    '<span class="sandbox-option-desc">' + escapeHtml(option.dataset.sandboxDescription || '') + '</span>' +
+                    '</span>';
+            });
+        }
+
+        function getSettingsSandboxOptions() {
+            if (!settingsSandboxGroup) return [];
+            return Array.prototype.slice.call(settingsSandboxGroup.querySelectorAll('.sandbox-option'));
+        }
+
+        function setSettingsSandboxMenuOpen(isOpen) {
+            if (!settingsSandboxCombobox || !settingsSandboxTrigger) return;
+            if (isOpen) {
+                setSettingsThemeMenuOpen(false);
+                setSettingsProviderMenuOpen(false);
+                if (settingsProviderModelComboboxController) settingsProviderModelComboboxController.setOpen(false);
+            }
+            settingsSandboxCombobox.classList.toggle('open', isOpen);
+            settingsSandboxTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            if (isOpen) {
+                var active = settingsSandboxGroup && settingsSandboxGroup.querySelector('.sandbox-option.active');
+                requestAnimationFrame(function () {
+                    (active || getSettingsSandboxOptions()[0] || settingsSandboxTrigger).focus();
+                });
+            }
+        }
+
+        function moveSettingsSandboxFocus(delta) {
+            var options = getSettingsSandboxOptions();
+            if (!options.length) return;
+            var currentIndex = options.indexOf(document.activeElement);
+            var nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + options.length) % options.length;
+            options[nextIndex].focus();
+        }
+
+        function handleSettingsSandboxOptionKeydown(e) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveSettingsSandboxFocus(1);
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveSettingsSandboxFocus(-1);
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                var first = getSettingsSandboxOptions()[0];
+                if (first) first.focus();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                var options = getSettingsSandboxOptions();
+                var last = options[options.length - 1];
+                if (last) last.focus();
+            } else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.currentTarget.click();
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setSettingsSandboxMenuOpen(false);
+                if (settingsSandboxTrigger) settingsSandboxTrigger.focus();
+            }
         }
 
         async function persistSandboxConfig() {
@@ -2219,15 +2471,214 @@
             return !!provider && isProviderInstalled(provider);
         }
 
-        function buildSettingsProviderOptionHtml(isActive, displayName, isDisabled) {
+        function buildSettingsComboboxOptionHtml(isActive, displayName, statusText) {
             return (
                 isActive
                     ? '<svg class="settings-combobox-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
                     : '<span class="settings-combobox-check-placeholder"></span>'
             ) +
                 '<span class="settings-combobox-option-label">' + escapeHtml(displayName || '') + '</span>' +
-                (isDisabled ? '<span class="settings-combobox-option-status">未安装</span>' : '');
+                (statusText ? '<span class="settings-combobox-option-status">' + escapeHtml(statusText) + '</span>' : '');
         }
+
+        function buildSettingsProviderOptionHtml(isActive, displayName, isDisabled) {
+            return buildSettingsComboboxOptionHtml(isActive, displayName, isDisabled ? '未安装' : '');
+        }
+
+        function createSettingsSingleSelectCombobox(config) {
+            var combobox = config.combobox;
+            var trigger = config.trigger;
+            var current = config.current;
+            var menu = config.menu;
+            var value = '';
+            var items = [];
+
+            function getEnabledOptions() {
+                if (!menu) return [];
+                return Array.prototype.slice.call(menu.querySelectorAll('.settings-combobox-option')).filter(function (item) {
+                    return !item.disabled;
+                });
+            }
+
+            function setOpen(isOpen) {
+                if (!combobox || !trigger) return;
+                if (isOpen && config.closeOthers) config.closeOthers();
+                combobox.classList.toggle('open', isOpen);
+                trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                if (isOpen) {
+                    var active = menu && menu.querySelector('.settings-combobox-option.active:not(:disabled)');
+                    requestAnimationFrame(function () {
+                        (active || getEnabledOptions()[0] || trigger).focus();
+                    });
+                }
+            }
+
+            function getSelectedItem() {
+                return items.find(function (item) {
+                    return item.value === value;
+                }) || null;
+            }
+
+            function renderDisplay() {
+                var selected = getSelectedItem();
+                if (current) current.textContent = selected ? selected.label : (config.placeholder || '请选择');
+                if (!menu) return;
+                Array.prototype.forEach.call(menu.querySelectorAll('.settings-combobox-option'), function (option) {
+                    var isActive = option.dataset.value === value;
+                    var isDisabled = option.dataset.disabled === 'true';
+                    option.classList.toggle('active', isActive);
+                    option.classList.toggle('disabled', isDisabled);
+                    option.disabled = isDisabled;
+                    option.setAttribute('aria-disabled', isDisabled ? 'true' : 'false');
+                    option.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                    option.innerHTML = buildSettingsComboboxOptionHtml(isActive, option.dataset.label || '', option.dataset.status || '');
+                });
+            }
+
+            function setValue(nextValue, options) {
+                options = options || {};
+                var nextItem = items.find(function (item) {
+                    return item.value === nextValue;
+                });
+                if (!nextItem || nextItem.disabled) return false;
+                value = nextValue;
+                renderDisplay();
+                if (!options.silent && config.onChange) config.onChange(nextItem.value, nextItem);
+                return true;
+            }
+
+            function moveFocus(delta) {
+                var options = getEnabledOptions();
+                if (!options.length) return;
+                var currentIndex = options.indexOf(document.activeElement);
+                var nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + options.length) % options.length;
+                options[nextIndex].focus();
+            }
+
+            function handleOptionKeydown(e) {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    moveFocus(1);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    moveFocus(-1);
+                } else if (e.key === 'Home') {
+                    e.preventDefault();
+                    var first = getEnabledOptions()[0];
+                    if (first) first.focus();
+                } else if (e.key === 'End') {
+                    e.preventDefault();
+                    var options = getEnabledOptions();
+                    var last = options[options.length - 1];
+                    if (last) last.focus();
+                } else if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.currentTarget.click();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setOpen(false);
+                    if (trigger) trigger.focus();
+                }
+            }
+
+            function render(nextItems, nextValue) {
+                items = Array.isArray(nextItems) ? nextItems : [];
+                value = nextValue || (items[0] && items[0].value) || '';
+                if (menu) {
+                    menu.innerHTML = '';
+                    items.forEach(function (item) {
+                        var option = document.createElement('button');
+                        option.className = 'settings-combobox-option';
+                        option.type = 'button';
+                        option.setAttribute('role', 'option');
+                        option.dataset.value = item.value;
+                        option.dataset.label = item.label;
+                        option.dataset.status = item.status || '';
+                        option.dataset.disabled = item.disabled ? 'true' : 'false';
+                        option.disabled = !!item.disabled;
+                        option.addEventListener('click', function (e) {
+                            e.stopPropagation();
+                            if (setValue(item.value)) {
+                                setOpen(false);
+                                if (trigger) trigger.focus();
+                            }
+                        });
+                        option.addEventListener('keydown', handleOptionKeydown);
+                        menu.appendChild(option);
+                    });
+                }
+                renderDisplay();
+            }
+
+            if (trigger) {
+                trigger.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    if (trigger.disabled) return;
+                    setOpen(!combobox.classList.contains('open'));
+                });
+                trigger.addEventListener('keydown', function (e) {
+                    if (trigger.disabled) return;
+                    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setOpen(true);
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setOpen(true);
+                        requestAnimationFrame(function () {
+                            var options = getEnabledOptions();
+                            var last = options[options.length - 1];
+                            if (last) last.focus();
+                        });
+                    } else if (e.key === 'Escape') {
+                        setOpen(false);
+                    }
+                });
+            }
+
+            if (menu) {
+                menu.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                });
+            }
+
+            return {
+                render: render,
+                setValue: setValue,
+                setOpen: setOpen,
+                contains: function (target) {
+                    return !!combobox && combobox.contains(target);
+                },
+                isOpen: function () {
+                    return !!combobox && combobox.classList.contains('open');
+                },
+                focusTrigger: function () {
+                    if (trigger) trigger.focus();
+                },
+                setDisabled: function (isDisabled) {
+                    if (trigger) trigger.disabled = !!isDisabled;
+                    if (combobox) combobox.classList.toggle('disabled', !!isDisabled);
+                },
+            };
+        }
+
+        settingsProviderModelComboboxController = createSettingsSingleSelectCombobox({
+            combobox: settingsProviderModelCombobox,
+            trigger: settingsProviderModelTrigger,
+            current: settingsProviderModelCurrent,
+            menu: settingsProviderModelMenu,
+            placeholder: '请选择模型',
+            closeOthers: function () {
+                setSettingsThemeMenuOpen(false);
+                setSettingsSandboxMenuOpen(false);
+                setSettingsProviderMenuOpen(false);
+            },
+            onChange: function (modelId) {
+                if (settingsProviderModelSelect) settingsProviderModelSelect.value = modelId;
+                var provider = getSelectedSettingsProvider();
+                if (!provider) return;
+                saveSettingsProviderModel(provider.type, modelId);
+            },
+        });
 
         function getSettingsProviderOptions(includeDisabled) {
             if (!settingsProviderMenu) return [];
@@ -2276,6 +2727,11 @@
 
         function setSettingsProviderMenuOpen(isOpen) {
             if (!settingsProviderCombobox || !settingsProviderTrigger) return;
+            if (isOpen) {
+                setSettingsThemeMenuOpen(false);
+                setSettingsSandboxMenuOpen(false);
+                if (settingsProviderModelComboboxController) settingsProviderModelComboboxController.setOpen(false);
+            }
             settingsProviderCombobox.classList.toggle('open', isOpen);
             settingsProviderTrigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
             if (isOpen) {
@@ -2346,7 +2802,10 @@
         }
 
         function closeSettingsPanel() {
+            setSettingsThemeMenuOpen(false);
+            setSettingsSandboxMenuOpen(false);
             setSettingsProviderMenuOpen(false);
+            if (settingsProviderModelComboboxController) settingsProviderModelComboboxController.setOpen(false);
             showChatView();
         }
 
@@ -2602,10 +3061,34 @@
             if (settingsProviderCombobox && !settingsProviderCombobox.contains(e.target)) {
                 setSettingsProviderMenuOpen(false);
             }
+            if (settingsThemeCombobox && !settingsThemeCombobox.contains(e.target)) {
+                setSettingsThemeMenuOpen(false);
+            }
+            if (settingsSandboxCombobox && !settingsSandboxCombobox.contains(e.target)) {
+                setSettingsSandboxMenuOpen(false);
+            }
+            if (settingsProviderModelComboboxController && !settingsProviderModelComboboxController.contains(e.target)) {
+                settingsProviderModelComboboxController.setOpen(false);
+            }
         });
 
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
+                if (settingsProviderModelComboboxController && settingsProviderModelComboboxController.isOpen()) {
+                    settingsProviderModelComboboxController.setOpen(false);
+                    settingsProviderModelComboboxController.focusTrigger();
+                    return;
+                }
+                if (settingsThemeCombobox && settingsThemeCombobox.classList.contains('open')) {
+                    setSettingsThemeMenuOpen(false);
+                    settingsThemeTrigger.focus();
+                    return;
+                }
+                if (settingsSandboxCombobox && settingsSandboxCombobox.classList.contains('open')) {
+                    setSettingsSandboxMenuOpen(false);
+                    settingsSandboxTrigger.focus();
+                    return;
+                }
                 if (settingsProviderCombobox && settingsProviderCombobox.classList.contains('open')) {
                     setSettingsProviderMenuOpen(false);
                     settingsProviderTrigger.focus();

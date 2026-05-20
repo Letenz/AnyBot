@@ -198,10 +198,16 @@
                                 <div class="settings-section-title">外观</div>
                                 <div class="settings-field">
                                     <span class="settings-field-label" id="settings-theme-label">主题</span>
-                                    <div class="theme-segmented" id="settings-theme-group" role="radiogroup" aria-labelledby="settings-theme-label">
-                                        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="light">浅色</button>
-                                        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="dark">深色</button>
-                                        <button class="theme-option" type="button" role="radio" aria-checked="false" data-theme-value="system">自动</button>
+                                    <div class="settings-combobox" id="settings-theme-combobox">
+                                        <button class="settings-combobox-trigger" id="settings-theme-trigger" type="button"
+                                                aria-haspopup="listbox" aria-expanded="false"
+                                                aria-labelledby="settings-theme-label settings-theme-current">
+                                            <span class="settings-combobox-value" id="settings-theme-current">自动</span>
+                                            <svg class="settings-combobox-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                                <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </button>
+                                        <div class="settings-combobox-menu" id="settings-theme-group" role="listbox" aria-labelledby="settings-theme-label"></div>
                                     </div>
                                 </div>
                             </div>
@@ -209,7 +215,17 @@
                                 <div class="settings-section-title">权限</div>
                                 <div class="settings-field">
                                     <span class="settings-field-label" id="settings-sandbox-label">默认权限</span>
-                                    <div class="sandbox-segmented" id="settings-sandbox-group" role="radiogroup" aria-labelledby="settings-sandbox-label"></div>
+                                    <div class="settings-combobox settings-sandbox-combobox" id="settings-sandbox-combobox">
+                                        <button class="settings-combobox-trigger" id="settings-sandbox-trigger" type="button"
+                                                aria-haspopup="listbox" aria-expanded="false"
+                                                aria-labelledby="settings-sandbox-label settings-sandbox-current">
+                                            <span class="settings-combobox-value" id="settings-sandbox-current">加载中…</span>
+                                            <svg class="settings-combobox-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                                <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </button>
+                                        <div class="settings-combobox-menu" id="settings-sandbox-group" role="listbox" aria-labelledby="settings-sandbox-label"></div>
+                                    </div>
                                 </div>
                             </div>
                         </section>
@@ -233,8 +249,19 @@
                                     <select class="settings-select" id="settings-provider-select" aria-hidden="true" tabindex="-1"></select>
                                 </div>
                                 <div class="settings-field">
-                                    <label class="settings-field-label" for="settings-provider-model-select">默认模型</label>
-                                    <select class="settings-inline-select" id="settings-provider-model-select"></select>
+                                    <span class="settings-field-label" id="settings-provider-model-label">默认模型</span>
+                                    <div class="settings-combobox" id="settings-provider-model-combobox">
+                                        <button class="settings-combobox-trigger" id="settings-provider-model-trigger" type="button"
+                                                aria-haspopup="listbox" aria-expanded="false"
+                                                aria-labelledby="settings-provider-model-label settings-provider-model-current">
+                                            <span class="settings-combobox-value" id="settings-provider-model-current">加载中…</span>
+                                            <svg class="settings-combobox-arrow" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                                <path d="M3 5l3 3 3-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </button>
+                                        <div class="settings-combobox-menu" id="settings-provider-model-menu" role="listbox" aria-labelledby="settings-provider-model-label"></div>
+                                    </div>
+                                    <select class="settings-select" id="settings-provider-model-select" aria-hidden="true" tabindex="-1"></select>
                                 </div>
                                 <div id="settings-provider-compat-toggle-fields"></div>
                                 <div id="settings-provider-bin-fields"></div>
