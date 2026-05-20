@@ -125,12 +125,13 @@ const stmts = {
 
   listSessions: db.prepare(`
     SELECT s.id, s.title, s.provider, s.source, s.project_id AS projectId,
-           s.created_at AS createdAt, s.updated_at AS updatedAt,
+           s.created_at AS createdAt,
+           MAX(s.updated_at, COALESCE(MAX(m.created_at), s.updated_at)) AS updatedAt,
            COUNT(m.id) AS messageCount
     FROM sessions s
     LEFT JOIN messages m ON m.session_id = s.id
     GROUP BY s.id
-    ORDER BY s.updated_at DESC
+    ORDER BY updatedAt DESC, s.created_at DESC, s.id DESC
   `),
 
   getSession: db.prepare(`

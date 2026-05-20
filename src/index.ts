@@ -23,7 +23,6 @@ import {
 } from "./web/model-config.js";
 import { startAllChannels } from "./channels/index.js";
 import type { ChannelCallbacks } from "./channels/index.js";
-import * as db from "./web/db.js";
 import {
   getWorkdir,
   getSandbox,
@@ -193,9 +192,6 @@ async function main(): Promise<void> {
     logIncludePrompt: includePromptInLogs(),
     webPort: WEB_PORT,
   });
-
-  db.detachAllChannelSessions();
-  logger.info("service.channel_sessions_detached");
 
   const webApp = createApp();
   webApp.listen(WEB_PORT, () => {

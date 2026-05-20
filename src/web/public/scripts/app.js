@@ -1161,8 +1161,8 @@
 
             var groups = {'今天': [], '昨天': [], '上周': [], '更早': []};
 
-            list.forEach(function (s) {
-                var t = s.updatedAt || s.createdAt;
+            sortSessionsByUpdatedAt(list).forEach(function (s) {
+                var t = getSessionSortTime(s);
                 if (t >= today) groups['今天'].push(s);
                 else if (t >= yesterday) groups['昨天'].push(s);
                 else if (t >= weekAgo) groups['上周'].push(s);
@@ -1170,6 +1170,20 @@
             });
 
             return groups;
+        }
+
+        function getSessionSortTime(s) {
+            return Number(s.updatedAt || s.createdAt || 0);
+        }
+
+        function sortSessionsByUpdatedAt(list) {
+            return list.slice().sort(function (a, b) {
+                var timeDiff = getSessionSortTime(b) - getSessionSortTime(a);
+                if (timeDiff !== 0) return timeDiff;
+                var createdDiff = Number(b.createdAt || 0) - Number(a.createdAt || 0);
+                if (createdDiff !== 0) return createdDiff;
+                return String(b.id || '').localeCompare(String(a.id || ''));
+            });
         }
 
         function readStoredSet(key) {
@@ -1297,7 +1311,9 @@
 
         function renderProjectSessions(projectId) {
             var list = document.createElement('div');
-            var projectSessions = sessions.filter(function (s) { return s.projectId === projectId; });
+            var projectSessions = sortSessionsByUpdatedAt(
+                sessions.filter(function (s) { return s.projectId === projectId; })
+            );
             if (projectSessions.length === 0) {
                 var empty = document.createElement('div');
                 empty.className = 'project-empty';
@@ -1503,7 +1519,7 @@
         async function fetchSessions() {
             try {
                 var res = await fetch('/api/sessions');
-                sessions = await res.json();
+                sessions = sortSessionsByUpdatedAt(await res.json());
                 renderHistory();
                 renderProjects();
                 await syncCurrentSessionFromSummary();
