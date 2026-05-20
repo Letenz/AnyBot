@@ -18,6 +18,10 @@
     user-select: none;
 }
 
+.claude-process.not-expandable .claude-process-summary {
+    cursor: default;
+}
+
 .claude-process-summary::-webkit-details-marker {
     display: none;
 }
@@ -35,6 +39,10 @@
     line-height: 1;
     transform: translateY(1px);
     transition: transform 0.16s ease;
+}
+
+.claude-process.not-expandable .claude-process-chevron {
+    display: none;
 }
 
 .claude-process[open] .claude-process-chevron {

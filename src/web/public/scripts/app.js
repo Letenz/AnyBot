@@ -132,6 +132,9 @@
         let activeStreamAbortController = null;
         let isBatchRenderingMessages = false;
         let currentSessionHasMoreMessages = false;
+        let currentSessionUpdatedAt = 0;
+        let currentNewestMessageId = 0;
+        let isCurrentSessionSyncInFlight = false;
         let isLoadingOlderMessages = false;
         let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
@@ -147,9 +150,11 @@
         const HIGHLIGHT_DARK_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark-dimmed.min.css';
         const HIGHLIGHT_LIGHT_CSS = 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
         const SIDEBAR_REFRESH_INTERVAL_MS = 5000;
+        const CURRENT_SESSION_REFRESH_INTERVAL_MS = 2000;
         const systemThemeQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
         let currentThemeSetting = readStoredTheme();
         let sidebarRefreshTimer = null;
+        let currentSessionRefreshTimer = null;
         let isSidebarRefreshInFlight = false;
 
         // 附件相关
@@ -871,6 +876,22 @@
             return first ? Number(first.dataset.messageId || 0) : null;
         }
 
+        function getNewestRenderedMessageId() {
+            var newest = 0;
+            messagesEl.querySelectorAll('.message-row[data-message-id]').forEach(function (row) {
+                var id = Number(row.dataset.messageId || 0);
+                if (id > newest) newest = id;
+            });
+            return newest;
+        }
+
+        function getNewestMessageId(messages) {
+            return (messages || []).reduce(function (newest, message) {
+                var id = Number(message && message.id || 0);
+                return id > newest ? id : newest;
+            }, 0);
+        }
+
         function removeOlderMessagesControl() {
             var existing = document.getElementById('load-older-messages');
             if (existing) existing.remove();
@@ -1235,7 +1256,7 @@
             item.appendChild(del);
 
             item.addEventListener('click', function () {
-                loadSession(s.id);
+                loadSession(s.id, { force: true });
             });
 
             return item;
@@ -1307,13 +1328,13 @@
                 });
                 btn.addEventListener('click', function (e) {
                     e.stopPropagation();
-                    loadSession(s.id);
+                    loadSession(s.id, { force: true });
                 });
                 btn.addEventListener('keydown', function (e) {
                     if (e.target !== btn) return;
                     if (e.key !== 'Enter' && e.key !== ' ') return;
                     e.preventDefault();
-                    loadSession(s.id);
+                    loadSession(s.id, { force: true });
                 });
                 list.appendChild(btn);
             });
@@ -1414,12 +1435,78 @@
             }
         }
 
+        function findSessionSummary(id) {
+            return sessions.find(function (s) { return s.id === id; }) || null;
+        }
+
+        async function syncCurrentSessionFromSummary() {
+            if (!currentSessionId || currentView !== 'chat') return;
+            if (isTyping || isLoadingOlderMessages || activeStreamSessionId === currentSessionId) return;
+            if (isCurrentSessionSyncInFlight) return;
+
+            var summary = findSessionSummary(currentSessionId);
+            if (!summary) return;
+
+            var summaryUpdatedAt = Number(summary.updatedAt || 0);
+            if (!summaryUpdatedAt) return;
+            if (!currentSessionUpdatedAt) {
+                currentSessionUpdatedAt = summaryUpdatedAt;
+                return;
+            }
+            if (summaryUpdatedAt <= currentSessionUpdatedAt) return;
+
+            isCurrentSessionSyncInFlight = true;
+            try {
+                await loadSession(currentSessionId, { force: true, silent: true });
+            } finally {
+                isCurrentSessionSyncInFlight = false;
+            }
+        }
+
+        async function pollCurrentSessionMessages() {
+            if (!currentSessionId || currentView !== 'chat') return;
+            if (document.hidden) return;
+            if (isTyping || isLoadingOlderMessages || activeStreamSessionId === currentSessionId) return;
+            var sessionId = currentSessionId;
+
+            if (isCurrentSessionSyncInFlight) return;
+            try {
+                var res = await fetch('/api/sessions/' + sessionId + '?limit=1');
+                if (!res.ok) return;
+                var data = await res.json();
+                if (currentSessionId !== sessionId || currentView !== 'chat') return;
+
+                var incomingNewestId = getNewestMessageId(data.messages);
+                var incomingUpdatedAt = Number(data.updatedAt || findSessionSummary(sessionId)?.updatedAt || 0);
+                var hasUnsubscribedStream = !!data.activeStream && activeStreamSessionId !== sessionId;
+                var hasNewMessage = incomingNewestId > currentNewestMessageId;
+                var hasNewerTimestamp = incomingUpdatedAt && currentSessionUpdatedAt && incomingUpdatedAt > currentSessionUpdatedAt;
+
+                if (hasUnsubscribedStream || hasNewMessage || hasNewerTimestamp) {
+                    if (isCurrentSessionSyncInFlight) return;
+                    isCurrentSessionSyncInFlight = true;
+                    try {
+                        await loadSession(sessionId, { force: true, silent: true });
+                    } finally {
+                        isCurrentSessionSyncInFlight = false;
+                    }
+                    return;
+                }
+
+                if (incomingUpdatedAt) currentSessionUpdatedAt = Math.max(currentSessionUpdatedAt || 0, incomingUpdatedAt);
+                if (incomingNewestId) currentNewestMessageId = Math.max(currentNewestMessageId || 0, incomingNewestId);
+            } catch (e) {
+                console.warn('Failed to sync current session messages:', e);
+            }
+        }
+
         async function fetchSessions() {
             try {
                 var res = await fetch('/api/sessions');
                 sessions = await res.json();
                 renderHistory();
                 renderProjects();
+                await syncCurrentSessionFromSummary();
             } catch (e) {
                 console.error('Failed to fetch sessions:', e);
             }
@@ -1454,13 +1541,22 @@
             }, SIDEBAR_REFRESH_INTERVAL_MS);
         }
 
+        function startCurrentSessionAutoRefresh() {
+            if (currentSessionRefreshTimer) clearInterval(currentSessionRefreshTimer);
+            currentSessionRefreshTimer = setInterval(function () {
+                pollCurrentSessionMessages();
+            }, CURRENT_SESSION_REFRESH_INTERVAL_MS);
+        }
+
         document.addEventListener('visibilitychange', function () {
             if (document.hidden) return;
             refreshSidebarDirectory();
+            pollCurrentSessionMessages();
         });
 
         window.addEventListener('beforeunload', function () {
             if (sidebarRefreshTimer) clearInterval(sidebarRefreshTimer);
+            if (currentSessionRefreshTimer) clearInterval(currentSessionRefreshTimer);
         });
 
         async function addProject() {
@@ -1519,6 +1615,8 @@
                 currentSessionId = data.id;
                 currentSessionProjectId = data.projectId || targetProjectId || null;
                 currentSessionProvider = data.provider || null;
+                currentSessionUpdatedAt = Number(data.updatedAt || Date.now());
+                currentNewestMessageId = 0;
                 activeProjectId = currentSessionProjectId;
                 revealSessionContainer(currentSessionProjectId);
                 showChatView();
@@ -1628,8 +1726,13 @@
             }
         }
 
-        async function loadSession(id) {
-            if (id === currentSessionId && currentView === 'chat') {
+        async function loadSession(id, options) {
+            options = options || {};
+            if (id === currentSessionId && activeStreamSessionId === id) {
+                inputEl.focus();
+                return;
+            }
+            if (id === currentSessionId && currentView === 'chat' && !options.force) {
                 inputEl.focus();
                 return;
             }
@@ -1638,7 +1741,7 @@
                 stopActiveStreamSubscription();
                 var res = await fetch('/api/sessions/' + id + '?limit=' + SESSION_MESSAGE_PAGE_SIZE);
                 if (!res.ok) {
-                    showError('加载会话失败');
+                    if (!options.silent) showError('加载会话失败');
                     return;
                 }
                 var data = await res.json();
@@ -1646,6 +1749,7 @@
                 currentSessionId = id;
                 currentSessionProjectId = data.projectId || null;
                 currentSessionProvider = data.provider || null;
+                currentSessionUpdatedAt = Number(data.updatedAt || findSessionSummary(id)?.updatedAt || currentSessionUpdatedAt || 0);
                 activeProjectId = data.projectId || null;
                 currentSessionHasMoreMessages = !!data.hasMoreMessages;
                 isLoadingOlderMessages = false;
@@ -1673,6 +1777,7 @@
                     isBatchRenderingMessages = false;
                 }
                 renderOlderMessagesControl();
+                currentNewestMessageId = getNewestRenderedMessageId();
                 scrollBottom();
                 await fetchModelConfig(currentSessionProvider);
 
@@ -1684,7 +1789,7 @@
                 updateSidebarSelection();
                 inputEl.focus();
             } catch (e) {
-                showError('加载会话失败');
+                if (!options.silent) showError('加载会话失败');
             }
         }
 
@@ -1695,6 +1800,8 @@
                     currentSessionId = null;
                     currentSessionProjectId = null;
                     currentSessionProvider = null;
+                    currentSessionUpdatedAt = 0;
+                    currentNewestMessageId = 0;
                     updateContextUsage(null);
                     showEmptyState();
                 }
@@ -4041,6 +4148,7 @@
                 await createNewChat();
             }
             startSidebarAutoRefresh();
+            startCurrentSessionAutoRefresh();
             inputEl.focus();
         }
 

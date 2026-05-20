@@ -98,11 +98,12 @@
         content.className = 'message-content claude-agent-message';
 
         var process = document.createElement('details');
-        process.className = 'claude-process';
-        process.open = opts.open !== undefined ? !!opts.open : !isPersisted;
+        process.className = 'claude-process not-expandable';
+        process.open = false;
 
         var processSummary = document.createElement('summary');
         processSummary.className = 'claude-process-summary';
+        processSummary.setAttribute('aria-disabled', 'true');
         processSummary.innerHTML =
             '<span class="claude-process-title" data-role="title">处理中 ' + formatDuration(state.durationMs) + '</span>' +
             '<span class="claude-process-chevron">›</span>';
@@ -155,10 +156,50 @@
             updateProcessTitle();
         }, 1000);
 
+        processSummary.addEventListener('click', function (event) {
+            if (!hasProcessDetails()) event.preventDefault();
+        });
+
+        processSummary.addEventListener('keydown', function (event) {
+            if (!hasProcessDetails() && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault();
+            }
+        });
+
+        process.addEventListener('toggle', function () {
+            if (process.open && !hasProcessDetails()) process.open = false;
+        });
+
         function updateProcessTitle() {
             var title = processSummary.querySelector('[data-role="title"]');
             var duration = formatDuration(state.durationMs || (Date.now() - startedAt));
             title.textContent = (state.status === 'running' ? '处理中 ' : '已处理 ') + duration;
+        }
+
+        function hasProcessDetails() {
+            var hasProcessText = state.processTextSegments.some(function (segment) {
+                return !!String(segment.text || '').trim();
+            });
+            return hasProcessText ||
+                state.tools.size > 0 ||
+                state.readFiles.size > 0 ||
+                state.searchCount > 0 ||
+                state.listCount > 0 ||
+                state.webCount > 0 ||
+                state.bashCount > 0 ||
+                state.editCount > 0;
+        }
+
+        function updateProcessAvailability() {
+            var canExpand = hasProcessDetails();
+            process.classList.toggle('not-expandable', !canExpand);
+            processSummary.setAttribute('aria-disabled', canExpand ? 'false' : 'true');
+            if (!canExpand && process.open) process.open = false;
+        }
+
+        function openProcessIfAvailable() {
+            updateProcessAvailability();
+            if (hasProcessDetails()) process.open = true;
         }
 
         function updateActivitySummary() {
@@ -172,11 +213,13 @@
 
             if (parts.length === 0) {
                 compactSummary.style.display = 'none';
+                updateProcessAvailability();
                 return;
             }
 
             compactSummary.style.display = 'flex';
             compactSummary.querySelector('[data-role="activity-summary"]').textContent = '已探索 ' + parts.join(',');
+            updateProcessAvailability();
         }
 
         function renderAnswer() {
@@ -256,6 +299,7 @@
             }
             segment.text += text;
             renderProcessTextSegment(segment);
+            updateProcessAvailability();
         }
 
         function removeFinalAnswerFromProcessText(finalText) {
@@ -287,6 +331,7 @@
                 return !!segment.text;
             });
             state.activeProcessTextSegment = null;
+            updateProcessAvailability();
         }
 
         function classifyTool(tool) {
@@ -448,7 +493,7 @@
 
             if (event.type === 'answer_delta') {
                 appendProcessText(event.text || '');
-                process.open = true;
+                openProcessIfAvailable();
                 return;
             }
 
@@ -460,6 +505,7 @@
                 state.status = 'completed';
                 updateProcessTitle();
                 if (ticker) clearInterval(ticker);
+                updateProcessAvailability();
                 process.open = false;
                 return;
             }
@@ -470,6 +516,7 @@
                 state.status = 'completed';
                 updateProcessTitle();
                 if (ticker) clearInterval(ticker);
+                updateProcessAvailability();
                 process.open = false;
                 return;
             }
@@ -480,6 +527,7 @@
                 state.status = 'completed';
                 updateProcessTitle();
                 if (ticker) clearInterval(ticker);
+                updateProcessAvailability();
                 process.open = false;
                 return;
             }
@@ -494,7 +542,7 @@
             if (event.type === 'tool_start') {
                 state.activeProcessTextSegment = null;
                 ensureTool(event.tool);
-                process.open = true;
+                openProcessIfAvailable();
                 return;
             }
 

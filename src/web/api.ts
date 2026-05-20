@@ -2,11 +2,10 @@ import { Router } from "express";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
-import { randomUUID } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { Request, Response } from "express";
-import { createProvider, getProvider, getRegisteredProviderTypes } from "../providers/index.js";
+import { getProvider } from "../providers/index.js";
 import { logger } from "../logger.js";
 import { getLogDir } from "../logger.js";
 import { getDataDir, readAppSettings, updateAppSettings, writeAppSettings, type AppSettings } from "../app-settings.js";
@@ -16,7 +15,6 @@ import {
   readModelConfig,
   readModelConfigForProvider,
   writeModelConfig,
-  getModelForProvider,
   setCurrentModel,
   setModelForProvider,
   setCurrentProvider,
@@ -36,27 +34,17 @@ import { readProxyConfig, writeProxyConfig, getProxyUrl, type ProxyConfig } from
 import { applyProxy } from "../proxy.js";
 import {
   approveChangeReview,
-  collectChangeReview,
-  createChangeSnapshot,
   getChangeReview,
   revertChangeReview,
-  type PublicChangeReview,
 } from "./change-review.js";
 import { ProxyAgent, fetch as undiciFetch } from "undici";
 import {
-  buildFirstTurnPrompt,
-  buildResumePrompt,
   generateId,
-  generateTitle,
   getWorkdir,
-  getSandbox,
 } from "../shared.js";
 import type { ClaudeAgentStreamEvent } from "../providers/claude-code-agent-events.js";
-import type { IProvider } from "../providers/index.js";
-import { ProviderCancelledError } from "../providers/types.js";
 import {
   attachAgentStreamClient,
-  buildAssistantMetadata,
   compactAgentEvents,
   createActiveAgentStream,
   emitAgentStream,
@@ -65,6 +53,13 @@ import {
   hasActiveAgentStream,
   type AgentStreamEvent,
 } from "./agent-stream.js";
+import {
+  ChatTurnValidationError,
+  prepareChatTurn,
+  runChatTurn,
+  runPreparedChatTurn,
+  type PreparedChatTurn,
+} from "../chat-runner.js";
 
 const execFile = promisify(execFileCallback);
 const DEFAULT_SESSION_MESSAGE_LIMIT = 40;
@@ -81,37 +76,6 @@ function isImageFile(filePath: string): boolean {
 
 function getUploadDir(): string {
   return path.join(getWorkdir(), "tmp", "uploads");
-}
-
-function isStreamingProvider(
-  provider: ReturnType<typeof getProvider>,
-): provider is IProvider & Required<Pick<IProvider, "runWithEvents">> {
-  return typeof provider.runWithEvents === "function";
-}
-
-function isRegisteredProviderType(providerType: string): boolean {
-  return getRegisteredProviderTypes().includes(providerType);
-}
-
-function getSessionProvider(session: Pick<db.ChatSession, "provider">): IProvider {
-  const currentProvider = getProvider();
-  const providerType = bindSessionProvider(session);
-  if (providerType === currentProvider.type) return currentProvider;
-  return createProvider(providerType);
-}
-
-function bindSessionProvider(session: Pick<db.ChatSession, "provider">): string {
-  if (!session.provider || !isRegisteredProviderType(session.provider)) {
-    const fallbackProvider = getProvider().type;
-    if (session.provider) {
-      logger.warn("web.session_provider_unsupported", {
-        provider: session.provider,
-        fallback: fallbackProvider,
-      });
-    }
-    session.provider = fallbackProvider;
-  }
-  return session.provider;
 }
 
 function readMessagePageQuery(req: Request): { beforeId: number | null; limit: number } {
@@ -187,26 +151,6 @@ async function hydrateChangeReviewMetadata(
       }
     }),
   );
-}
-
-async function safeCreateChangeSnapshotForWorkdir(workdir: string): Promise<Awaited<ReturnType<typeof createChangeSnapshot>>> {
-  try {
-    return await createChangeSnapshot(workdir);
-  } catch (error) {
-    logger.warn("change_review.snapshot_failed", { error });
-    return null;
-  }
-}
-
-async function safeCollectChangeReview(
-  snapshot: Awaited<ReturnType<typeof createChangeSnapshot>>,
-): Promise<PublicChangeReview | null> {
-  try {
-    return await collectChangeReview(snapshot);
-  } catch (error) {
-    logger.warn("change_review.collect_failed", { error });
-    return null;
-  }
 }
 
 function normalizeProjectPath(inputPath: string): string {
@@ -388,16 +332,39 @@ function getSessionWorkdir(session: Pick<db.ChatSession, "projectId">): string {
   return normalizeProjectPath(project.path);
 }
 
-function resolveRunModel(provider: IProvider, requestedModelId?: string): string {
-  const fallback = getModelForProvider(provider.type);
-  const modelId = requestedModelId?.trim();
-  if (!modelId) return fallback;
+type ChatAttachment = { path: string; name: string };
 
-  const valid = provider.listModels().some((model) => model.id === modelId);
-  if (!valid) {
-    throw new Error(`不支持的模型: ${modelId}`);
+function prepareWebChatInput(content?: string, attachments: ChatAttachment[] = []) {
+  let userText = (content || "").trim();
+  const imagePaths: string[] = [];
+  const filePaths: ChatAttachment[] = [];
+
+  for (const att of attachments) {
+    if (isImageFile(att.name)) {
+      imagePaths.push(att.path);
+    } else {
+      filePaths.push(att);
+    }
   }
-  return modelId;
+
+  if (filePaths.length > 0) {
+    const fileList = filePaths.map((f) => `- ${f.name}: ${f.path}`).join("\n");
+    userText = `${userText}\n\n用户附带了以下文件，请读取并处理：\n${fileList}`;
+  }
+  if (imagePaths.length > 0) {
+    const imgList = imagePaths.map((p) => `- ${path.basename(p)}: ${p}`).join("\n");
+    userText = `${userText}\n\n用户附带了以下图片：\n${imgList}`;
+  }
+
+  const attachmentInfo = attachments.map((a) => ({ name: a.name, path: a.path }));
+  return {
+    userText,
+    imagePaths,
+    fileCount: filePaths.length,
+    storedUserContent: content?.trim() || "[附件]",
+    titleText: content?.trim() || "文件分析",
+    userMetadata: attachmentInfo.length > 0 ? JSON.stringify({ attachments: attachmentInfo }) : null,
+  };
 }
 
 // multer 配置：保留原始扩展名
@@ -492,7 +459,14 @@ export function chatRouter(): Router {
       updatedAt: Date.now(),
     };
     db.createSession(session);
-    res.json({ id: session.id, title: session.title, projectId: session.projectId, provider: session.provider });
+    res.json({
+      id: session.id,
+      title: session.title,
+      projectId: session.projectId,
+      provider: session.provider,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    });
   });
 
   router.get("/sessions/:id", async (req: Request, res: Response) => {
@@ -507,7 +481,10 @@ export function chatRouter(): Router {
       id: session.id,
       title: session.title,
       provider: session.provider,
+      source: session.source,
       projectId: session.projectId,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
       messages: await prepareMessagesForClient(page.messages),
       hasMoreMessages: page.hasMore,
       activeStream: getActiveAgentStreamInfo(session.id),
@@ -1124,25 +1101,12 @@ export function chatRouter(): Router {
 
     const { content, attachments, modelId } = req.body as {
       content?: string;
-      attachments?: { path: string; name: string }[];
+      attachments?: ChatAttachment[];
       modelId?: string;
     };
-    if (!content?.trim() && (!attachments || attachments.length === 0)) {
+    const requestAttachments = Array.isArray(attachments) ? attachments : [];
+    if (!content?.trim() && requestAttachments.length === 0) {
       res.status(400).json({ error: "消息不能为空" });
-      return;
-    }
-
-    bindSessionProvider(session);
-    const provider = getSessionProvider(session);
-    if (!isStreamingProvider(provider)) {
-      res.status(409).json({ error: "当前会话或 Provider 不支持 Agent 流式展示" });
-      return;
-    }
-    let selectedModel: string;
-    try {
-      selectedModel = resolveRunModel(provider, modelId);
-    } catch (error) {
-      res.status(400).json({ error: error instanceof Error ? error.message : "模型不可用" });
       return;
     }
 
@@ -1154,178 +1118,47 @@ export function chatRouter(): Router {
       return;
     }
 
-    let userText = (content || "").trim();
-    const imagePaths: string[] = [];
-    const filePaths: { path: string; name: string }[] = [];
-
-    if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
-        if (isImageFile(att.name)) {
-          imagePaths.push(att.path);
-        } else {
-          filePaths.push(att);
-        }
+    const input = prepareWebChatInput(content, requestAttachments);
+    let prepared: PreparedChatTurn;
+    try {
+      prepared = prepareChatTurn({
+        session,
+        userText: input.userText,
+        storedUserContent: input.storedUserContent,
+        titleText: input.titleText,
+        userMetadata: input.userMetadata,
+        imagePaths: input.imagePaths,
+        modelId,
+        workdir: sessionWorkdir,
+        includeWorkspaceMemory: !session.projectId,
+        requireStreaming: true,
+      });
+    } catch (error) {
+      if (error instanceof ChatTurnValidationError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
       }
-      if (filePaths.length > 0) {
-        const fileList = filePaths.map(f => `- ${f.name}: ${f.path}`).join("\n");
-        userText = `${userText}\n\n用户附带了以下文件，请读取并处理：\n${fileList}`;
-      }
-      if (imagePaths.length > 0) {
-        const imgList = imagePaths.map(p => `- ${path.basename(p)}: ${p}`).join("\n");
-        userText = `${userText}\n\n用户附带了以下图片：\n${imgList}`;
-      }
+      res.status(400).json({ error: error instanceof Error ? error.message : "模型不可用" });
+      return;
     }
-
-    const attachmentInfo = (attachments || []).map(a => ({ name: a.name, path: a.path }));
-    const metadata = attachmentInfo.length > 0 ? JSON.stringify({ attachments: attachmentInfo }) : null;
-
-    db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
-
-    if (db.countMessages(id) <= 1) {
-      session.title = generateTitle(content?.trim() || "文件分析");
-    }
-    db.updateSession({
-      id,
-      title: session.title,
-      sessionId: session.sessionId,
-      provider: session.provider,
-      updatedAt: Date.now(),
-    });
-
-    const prompt = session.sessionId
-      ? buildResumePrompt(userText, session.source || "web")
-      : buildFirstTurnPrompt(userText, session.source || "web", {
-          workdir: sessionWorkdir,
-          sandbox: getSandbox(),
-          includeWorkspaceMemory: !session.projectId,
-        });
 
     const runAbortController = new AbortController();
     activeRunControllers.set(id, runAbortController);
     const active = createActiveAgentStream(id);
     attachAgentStreamClient(id, res);
 
-    const agentEvents: ClaudeAgentStreamEvent[] = [];
-    const emit = (event: AgentStreamEvent) => {
-      if (
-        event.type !== "result" &&
-        event.type !== "error" &&
-        event.type !== "cancelled" &&
-        event.type !== "done"
-      ) {
-        agentEvents.push(event);
-      }
-      emitAgentStream(active, event);
-    };
+    const emit = (event: AgentStreamEvent) => emitAgentStream(active, event);
 
     void (async () => {
-      const changeSnapshot = await safeCreateChangeSnapshotForWorkdir(sessionWorkdir);
       try {
-        logger.info("web.chat.stream.start", {
-          sessionId: session.id,
-          providerSessionId: session.sessionId,
-          provider: provider.type,
-          model: selectedModel,
-          workdir: sessionWorkdir,
-          userTextChars: userText.length,
-          imageCount: imagePaths.length,
-          fileCount: filePaths.length,
-        });
-
-        const result = await provider.runWithEvents({
-          workdir: sessionWorkdir,
-          sandbox: getSandbox(),
-          model: selectedModel,
-          prompt,
-          imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
-          sessionId: session.sessionId || undefined,
-          newSessionId: session.sessionId ? undefined : randomUUID(),
+        await runPreparedChatTurn(prepared, {
           signal: runAbortController.signal,
-          onEvent: emit,
+          stream: { emit },
+          logPrefix: "web.chat.stream",
+          logFields: { fileCount: input.fileCount },
         });
-
-        const providerSessionId = result.sessionId || session.sessionId;
-        const changeReview = await safeCollectChangeReview(changeSnapshot);
-        if (result.contextUsage) {
-          emit({
-            type: "context_usage",
-            usage: result.contextUsage,
-          });
-        }
-
-        db.addMessage(
-          id,
-          "assistant",
-          result.text,
-          buildAssistantMetadata({
-            provider: provider.type,
-            events: agentEvents,
-            changeReview,
-          }),
-        );
-        db.updateSession({
-          id,
-          title: session.title,
-          sessionId: providerSessionId,
-          provider: session.provider,
-          updatedAt: Date.now(),
-        });
-
-        emit({
-          type: "result",
-          content: result.text,
-          title: session.title,
-          sessionId: providerSessionId,
-          provider: provider.type,
-          changeReview,
-          contextUsage: result.contextUsage,
-        });
-
-        logger.info("web.chat.stream.success", {
-          sessionId: session.id,
-          providerSessionId,
-          provider: provider.type,
-          replyChars: result.text.length,
-        });
-      } catch (error) {
-        if (error instanceof ProviderCancelledError) {
-          const changeReview = await safeCollectChangeReview(changeSnapshot);
-          db.addMessage(
-            id,
-            "assistant",
-            "已中断",
-            buildAssistantMetadata({
-              provider: provider.type,
-              events: agentEvents,
-              changeReview,
-            }),
-          );
-          db.updateSession({
-            id,
-            title: session.title,
-            sessionId: session.sessionId,
-            provider: session.provider,
-            updatedAt: Date.now(),
-          });
-          logger.info("web.chat.stream.cancelled", {
-            sessionId: session.id,
-            provider: provider.type,
-          });
-          emit({
-            type: "cancelled",
-            message: "已中断",
-          });
-          return;
-        }
-
-        logger.error("web.chat.stream.failed", {
-          sessionId: session.id,
-          error,
-        });
-        emit({
-          type: "error",
-          error: error instanceof Error ? error.message : "处理消息时出错了，请稍后再试。",
-        });
+      } catch {
+        // runPreparedChatTurn 已记录日志并推送 error 事件，这里只负责收尾。
       } finally {
         activeRunControllers.delete(id);
         finishAgentStream(id, active);
@@ -1348,10 +1181,11 @@ export function chatRouter(): Router {
 
     const { content, attachments, modelId } = req.body as {
       content?: string;
-      attachments?: { path: string; name: string }[];
+      attachments?: ChatAttachment[];
       modelId?: string;
     };
-    if (!content?.trim() && (!attachments || attachments.length === 0)) {
+    const requestAttachments = Array.isArray(attachments) ? attachments : [];
+    if (!content?.trim() && requestAttachments.length === 0) {
       res.status(400).json({ error: "消息不能为空" });
       return;
     }
@@ -1364,118 +1198,36 @@ export function chatRouter(): Router {
       return;
     }
 
-    bindSessionProvider(session);
-    const provider = getSessionProvider(session);
-    let selectedModel: string;
-    try {
-      selectedModel = resolveRunModel(provider, modelId);
-    } catch (error) {
-      res.status(400).json({ error: error instanceof Error ? error.message : "模型不可用" });
-      return;
-    }
-
-    // 构建包含附件信息的用户文本
-    let userText = (content || "").trim();
-    const imagePaths: string[] = [];
-    const filePaths: { path: string; name: string }[] = [];
-
-    if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
-        if (isImageFile(att.name)) {
-          imagePaths.push(att.path);
-        } else {
-          filePaths.push(att);
-        }
-      }
-      // 非图片文件信息拼接到 prompt
-      if (filePaths.length > 0) {
-        const fileList = filePaths.map(f => `- ${f.name}: ${f.path}`).join("\n");
-        userText = `${userText}\n\n用户附带了以下文件，请读取并处理：\n${fileList}`;
-      }
-      // 图片文件也补充提示
-      if (imagePaths.length > 0) {
-        const imgList = imagePaths.map(p => `- ${path.basename(p)}: ${p}`).join("\n");
-        userText = `${userText}\n\n用户附带了以下图片：\n${imgList}`;
-      }
-    }
-
-    // 构建 metadata（附件信息：名称 + 路径）
-    const attachmentInfo = (attachments || []).map(a => ({ name: a.name, path: a.path }));
-    const metadata = attachmentInfo.length > 0 ? JSON.stringify({ attachments: attachmentInfo }) : null;
-
-    db.addMessage(id, "user", content?.trim() || "[附件]", metadata);
-
-    if (db.countMessages(id) <= 1) {
-      session.title = generateTitle(content?.trim() || "文件分析");
-    }
-
-    const prompt = session.sessionId
-      ? buildResumePrompt(userText, session.source || "web")
-      : buildFirstTurnPrompt(userText, session.source || "web", {
-          workdir: sessionWorkdir,
-          sandbox: getSandbox(),
-          includeWorkspaceMemory: !session.projectId,
-        });
+    const input = prepareWebChatInput(content, requestAttachments);
 
     try {
-      logger.info("web.chat.start", {
-        sessionId: session.id,
-        providerSessionId: session.sessionId,
-        provider: provider.type,
-        model: selectedModel,
+      const result = await runChatTurn({
+        session,
+        userText: input.userText,
+        storedUserContent: input.storedUserContent,
+        titleText: input.titleText,
+        userMetadata: input.userMetadata,
+        imagePaths: input.imagePaths,
+        modelId,
         workdir: sessionWorkdir,
-        userTextChars: userText.length,
-        imageCount: imagePaths.length,
-        fileCount: filePaths.length,
-      });
-
-      const changeSnapshot = await safeCreateChangeSnapshotForWorkdir(sessionWorkdir);
-      const result = await provider.run({
-        workdir: sessionWorkdir,
-        sandbox: getSandbox(),
-        model: selectedModel,
-        prompt,
-        imagePaths: imagePaths.length > 0 ? imagePaths : undefined,
-        sessionId: session.sessionId || undefined,
-        newSessionId: session.sessionId ? undefined : randomUUID(),
-      });
-
-      const providerSessionId = result.sessionId || session.sessionId;
-      const changeReview = await safeCollectChangeReview(changeSnapshot);
-      db.addMessage(
-        id,
-        "assistant",
-        result.text,
-        buildAssistantMetadata({ provider: provider.type, changeReview }),
-      );
-      db.updateSession({
-        id,
-        title: session.title,
-        sessionId: providerSessionId,
-        provider: session.provider,
-        updatedAt: Date.now(),
-      });
-
-      logger.info("web.chat.success", {
-        sessionId: session.id,
-        providerSessionId,
-        provider: provider.type,
-        replyChars: result.text.length,
+        includeWorkspaceMemory: !session.projectId,
+        logPrefix: "web.chat",
+        logFields: { fileCount: input.fileCount },
       });
 
       res.json({
         role: "assistant",
-        content: result.text,
-        title: session.title,
-        provider: provider.type,
-        changeReview,
+        content: result.content,
+        title: result.title,
+        provider: result.provider,
+        changeReview: result.changeReview,
         contextUsage: result.contextUsage,
       });
     } catch (error) {
-      logger.error("web.chat.failed", {
-        sessionId: session.id,
-        error,
-      });
+      if (error instanceof ChatTurnValidationError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
 
       const errorMessage =
         error instanceof Error ? error.message : "处理消息时出错了，请稍后再试。";
