@@ -37,6 +37,7 @@ const desktopUpdateState = {
   updateInfo: null,
   progress: null,
   error: null,
+  checkedAt: null,
 };
 
 function getAppRoot() {
@@ -240,6 +241,7 @@ function getDesktopUpdateStatus() {
     updateInfo: desktopUpdateState.updateInfo,
     progress: desktopUpdateState.progress,
     error: desktopUpdateState.error,
+    checkedAt: desktopUpdateState.checkedAt,
   };
 }
 
@@ -311,6 +313,7 @@ function ensureAutoUpdaterConfigured(updater) {
       updateInfo,
       progress: null,
       error: null,
+      checkedAt: Date.now(),
     });
     writeLog("update", `available ${updateInfo?.version || "unknown"}`);
   });
@@ -324,6 +327,7 @@ function ensureAutoUpdaterConfigured(updater) {
       updateInfo,
       progress: null,
       error: null,
+      checkedAt: Date.now(),
     });
     writeLog("update", "not available");
   });
@@ -363,6 +367,7 @@ function ensureAutoUpdaterConfigured(updater) {
       message: "更新失败。",
       error: message,
       progress: null,
+      checkedAt: Date.now(),
     });
     writeLog("update:error", message);
   });
@@ -400,6 +405,7 @@ async function checkDesktopUpdate() {
           updateInfo,
           progress: null,
           error: null,
+          checkedAt: Date.now(),
         });
       }
     } catch (error) {
@@ -409,6 +415,7 @@ async function checkDesktopUpdate() {
         message: "检测更新失败。",
         error: message,
         progress: null,
+        checkedAt: Date.now(),
       });
       writeLog("update:error", message);
     } finally {

@@ -105,8 +105,8 @@
         const settingsImportFile = document.getElementById('settings-import-file');
         const settingsClearHistoryBtn = document.getElementById('settings-clear-history-btn');
         const settingsAboutVersion = document.getElementById('settings-about-version');
-        const settingsUpdateSection = document.getElementById('settings-update-section');
         const settingsUpdateStatus = document.getElementById('settings-update-status');
+        const settingsUpdateCheckedAt = document.getElementById('settings-update-checked-at');
         const settingsUpdateProgress = document.getElementById('settings-update-progress');
         const settingsUpdateProgressFill = document.getElementById('settings-update-progress-fill');
         const settingsUpdateProgressText = document.getElementById('settings-update-progress-text');
@@ -158,9 +158,7 @@
         let inputHistoryNavigationPromise = null;
         let inputHistoryNavigationVersion = 0;
         let skillPickerOpen = false;
-        const isDesktopAppClient = /\bElectron\//i.test(navigator.userAgent || '');
-
-        if (settingsUpdateSection) settingsUpdateSection.hidden = !isDesktopAppClient;
+        const GITHUB_LATEST_RELEASE_URL = 'https://github.com/1935417243/AnyBot/releases/latest';
         let skillPickerQuery = '';
         let skillPickerTokenStart = null;
         let skillPickerTokenEnd = null;
@@ -2781,7 +2779,7 @@
             provider: ['提供商', '提供商配置'],
             workspace: ['工作区', '默认工作目录和项目入口'],
             privacy: ['隐私与日志', '日志目录和清理操作'],
-            about: ['关于', isDesktopAppClient ? '版本信息和 Windows 自动更新' : '版本信息'],
+            about: ['关于', '版本信息和更新'],
         };
 
         function createDefaultAppSettings() {
@@ -2915,23 +2913,43 @@
 
         function getUpdateStatusTone(state) {
             if (state === 'available' || state === 'downloaded' || state === 'not-available') return 'ready';
-            if (state === 'unsupported' || state === 'unavailable') return 'warn';
+            if (state === 'unsupported' || state === 'unavailable') return '';
             if (state === 'error') return 'error';
             return '';
         }
 
+        function formatUpdateCheckedAt(value) {
+            var timestamp = Number(value || 0);
+            if (!Number.isFinite(timestamp) || timestamp <= 0) return '尚未检查';
+            var date = new Date(timestamp);
+            if (Number.isNaN(date.getTime())) return '尚未检查';
+            return date.getFullYear() + '/' +
+                String(date.getMonth() + 1) + '/' +
+                String(date.getDate()) + ' ' +
+                String(date.getHours()).padStart(2, '0') + ':' +
+                String(date.getMinutes()).padStart(2, '0') + ':' +
+                String(date.getSeconds()).padStart(2, '0');
+        }
+
+        function isManualUpdateStatus(status) {
+            return Boolean(status && (status.manualDownload || status.supported === false));
+        }
+
+        function getUpdateReleaseUrl(status) {
+            return (status && (status.downloadUrl || status.releaseUrl)) || GITHUB_LATEST_RELEASE_URL;
+        }
+
         function getUpdateStatusText(status) {
             if (!status) return '加载中…';
-            if (status.message) return status.message;
-            if (status.state === 'checking') return '正在检测更新...';
-            if (status.state === 'available') return '发现新版本 ' + (status.latestVersion || '');
+            if (status.state === 'checking') return '正在检查更新...';
+            if (status.state === 'available') return '发现新版本' + (status.latestVersion ? ' · ' + status.latestVersion : '');
             if (status.state === 'downloading') return '正在下载更新...';
             if (status.state === 'downloaded') return '更新已下载，重启后安装。';
             if (status.state === 'not-available') return '当前已是最新版本。';
-            if (status.state === 'unsupported') return '当前平台暂不支持应用内自动更新。';
-            if (status.state === 'unavailable') return '当前环境不能检查更新。';
+            if (status.state === 'unsupported' || status.state === 'unavailable') return '准备检查更新。';
             if (status.state === 'error') return '更新失败。';
-            return '准备检测更新。';
+            if (status.message) return status.message;
+            return '准备检查更新。';
         }
 
         function renderDesktopUpdateStatus(status) {
@@ -2939,12 +2957,12 @@
             status = desktopUpdateStatus;
             var state = status && status.state;
             var progress = status && status.progress;
-
-            if (settingsUpdateSection) {
-                settingsUpdateSection.hidden = !isDesktopAppClient;
-            }
+            var manualDownload = isManualUpdateStatus(status);
             if (settingsAboutVersion) {
                 settingsAboutVersion.textContent = status && status.currentVersion ? status.currentVersion : '未知';
+            }
+            if (settingsUpdateCheckedAt) {
+                settingsUpdateCheckedAt.textContent = formatUpdateCheckedAt(status && status.checkedAt);
             }
             if (settingsUpdateStatus) {
                 settingsUpdateStatus.classList.remove('ready', 'warn', 'error');
@@ -2969,15 +2987,17 @@
             }
 
             if (settingsUpdateCheckBtn) {
-                var canCheck = status && status.supported && state !== 'checking' && state !== 'downloading' && state !== 'downloaded' && state !== 'restarting';
+                var canCheck = status && state !== 'checking' && state !== 'downloading' && state !== 'downloaded' && state !== 'restarting';
                 settingsUpdateCheckBtn.disabled = !canCheck;
-                settingsUpdateCheckBtn.textContent = state === 'checking' ? '检测中…' : '检测更新';
+                settingsUpdateCheckBtn.textContent = state === 'checking' ? '检查中…' : '检查更新';
             }
             if (settingsUpdateDownloadBtn) {
-                var canDownload = status && status.supported && state === 'available';
-                settingsUpdateDownloadBtn.hidden = !(state === 'available' || state === 'downloading');
-                settingsUpdateDownloadBtn.disabled = !canDownload;
-                settingsUpdateDownloadBtn.textContent = state === 'downloading' ? '下载中…' : '下载更新';
+                var canDownload = status && ((status.supported && state === 'available') || manualDownload);
+                settingsUpdateDownloadBtn.hidden = manualDownload ? state === 'not-available' : !(state === 'available' || state === 'downloading');
+                settingsUpdateDownloadBtn.disabled = !canDownload || state === 'checking' || state === 'restarting';
+                settingsUpdateDownloadBtn.textContent = manualDownload
+                    ? '前往下载'
+                    : (state === 'downloading' ? '下载中…' : '立即下载');
             }
             if (settingsUpdateRestartBtn) {
                 settingsUpdateRestartBtn.hidden = state !== 'downloaded' && state !== 'restarting';
@@ -3019,17 +3039,21 @@
         async function checkDesktopUpdate() {
             if (!settingsUpdateCheckBtn) return;
             settingsUpdateCheckBtn.disabled = true;
-            settingsUpdateCheckBtn.textContent = '检测中…';
+            settingsUpdateCheckBtn.textContent = '检查中…';
             try {
                 renderDesktopUpdateStatus(await requestDesktopUpdate('check', 'POST'));
             } catch (e) {
-                showError(e && e.message ? e.message : '检测更新失败');
+                showError(e && e.message ? e.message : '检查更新失败');
                 await fetchDesktopUpdateStatus();
             }
         }
 
         async function downloadDesktopUpdate() {
             if (!settingsUpdateDownloadBtn) return;
+            if (isManualUpdateStatus(desktopUpdateStatus)) {
+                window.open(getUpdateReleaseUrl(desktopUpdateStatus), '_blank', 'noopener');
+                return;
+            }
             settingsUpdateDownloadBtn.disabled = true;
             settingsUpdateDownloadBtn.textContent = '下载中…';
             try {
@@ -3054,7 +3078,7 @@
 
         function updateDesktopUpdatePolling() {
             var state = desktopUpdateStatus && desktopUpdateStatus.state;
-            var shouldPoll = isDesktopAppClient && activeSettingsTab === 'about' && (state === 'checking' || state === 'downloading');
+            var shouldPoll = activeSettingsTab === 'about' && (state === 'checking' || state === 'downloading');
             if (!shouldPoll) {
                 if (desktopUpdatePollTimer) {
                     clearInterval(desktopUpdatePollTimer);
@@ -3218,21 +3242,31 @@
             return suggestions;
         }
 
-        function buildProviderModelInput(id, value) {
-            return '<div class="provider-model-input-control">' +
+        function buildProviderModelInput(id, value, label) {
+            return '<div class="provider-settings-input-control provider-model-input-control">' +
                 '<input class="settings-inline-input provider-model-input" id="' + escapeAttr(id) + '"' +
+                ' aria-label="' + escapeAttr(label || '') + '"' +
                 ' data-provider-model-suggestion-input="true" value="' + escapeAttr(value || '') + '"' +
                 ' spellcheck="false" autocomplete="off">' +
                 '<div class="provider-model-suggest-menu" role="listbox"></div>' +
                 '</div>';
         }
 
-        function buildProviderBaseUrlInput(value) {
-            return '<div class="provider-model-input-control">' +
+        function buildProviderBaseUrlInput(value, label) {
+            return '<div class="provider-settings-input-control provider-model-input-control">' +
                 '<input class="settings-inline-input" id="settings-provider-anthropic-base-url" type="url"' +
+                ' aria-label="' + escapeAttr(label || '') + '"' +
                 ' data-provider-base-url-suggestion-input="true" value="' + escapeAttr(value || '') + '"' +
                 ' spellcheck="false" autocomplete="off">' +
                 '<div class="provider-model-suggest-menu" role="listbox"></div>' +
+                '</div>';
+        }
+
+        function buildProviderSecretInput(id, value, label) {
+            return '<div class="provider-settings-input-control">' +
+                '<input class="settings-inline-input" id="' + escapeAttr(id) + '" type="password"' +
+                ' aria-label="' + escapeAttr(label || '') + '"' +
+                ' value="' + escapeAttr(value || '') + '" autocomplete="off" spellcheck="false">' +
                 '</div>';
         }
 
@@ -3540,20 +3574,20 @@
         }
 
         function buildClaudeCodeCompatFields(cfg) {
-            return '<label class="settings-row"><span><strong>Anthropic Base URL</strong><small>兼容 Anthropic API 的服务地址</small></span>' +
-                buildProviderBaseUrlInput(cfg.anthropicBaseUrl || '') + '</label>' +
-                '<label class="settings-row"><span><strong>API Key</strong><small>访问兼容服务所需的密钥</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-api-key" type="password" value="' + escapeAttr(cfg.apiKey || '') + '"></label>' +
-                '<label class="settings-row"><span><strong>Auto 模型</strong><small>用于 Auto 模型</small></span>' +
-                buildProviderModelInput('settings-provider-anthropic-auto-model', cfg.anthropicAutoModel || cfg.defaultModel || '') + '</label>' +
-                '<label class="settings-row"><span><strong>Opus 模型</strong><small>用于 Opus 模型</small></span>' +
-                buildProviderModelInput('settings-provider-anthropic-opus-model', cfg.anthropicOpusModel || '') + '</label>' +
-                '<label class="settings-row"><span><strong>Sonnet 模型</strong><small>用于 Sonnet 模型</small></span>' +
-                buildProviderModelInput('settings-provider-anthropic-sonnet-model', cfg.anthropicSonnetModel || '') + '</label>' +
-                '<label class="settings-row"><span><strong>Haiku / Fast 模型</strong><small>用于轻量或快速模型</small></span>' +
-                buildProviderModelInput('settings-provider-anthropic-haiku-model', cfg.anthropicHaikuModel || '') + '</label>' +
-                '<label class="settings-row"><span><strong>Subagent 模型</strong><small>用于子任务模型</small></span>' +
-                buildProviderModelInput('settings-provider-subagent-model', cfg.claudeCodeSubagentModel || '') + '</label>';
+            return '<div class="settings-row"><span><strong>Anthropic Base URL</strong><small>兼容 Anthropic API 的服务地址</small></span>' +
+                buildProviderBaseUrlInput(cfg.anthropicBaseUrl || '', 'Anthropic Base URL') + '</div>' +
+                '<div class="settings-row"><span><strong>API Key</strong><small>访问兼容服务所需的密钥</small></span>' +
+                buildProviderSecretInput('settings-provider-api-key', cfg.apiKey || '', 'API Key') + '</div>' +
+                '<div class="settings-row"><span><strong>Auto 模型</strong><small>用于 Auto 模型</small></span>' +
+                buildProviderModelInput('settings-provider-anthropic-auto-model', cfg.anthropicAutoModel || cfg.defaultModel || '', 'Auto 模型') + '</div>' +
+                '<div class="settings-row"><span><strong>Opus 模型</strong><small>用于 Opus 模型</small></span>' +
+                buildProviderModelInput('settings-provider-anthropic-opus-model', cfg.anthropicOpusModel || '', 'Opus 模型') + '</div>' +
+                '<div class="settings-row"><span><strong>Sonnet 模型</strong><small>用于 Sonnet 模型</small></span>' +
+                buildProviderModelInput('settings-provider-anthropic-sonnet-model', cfg.anthropicSonnetModel || '', 'Sonnet 模型') + '</div>' +
+                '<div class="settings-row"><span><strong>Haiku / Fast 模型</strong><small>用于轻量或快速模型</small></span>' +
+                buildProviderModelInput('settings-provider-anthropic-haiku-model', cfg.anthropicHaikuModel || '', 'Haiku / Fast 模型') + '</div>' +
+                '<div class="settings-row"><span><strong>Subagent 模型</strong><small>用于子任务模型</small></span>' +
+                buildProviderModelInput('settings-provider-subagent-model', cfg.claudeCodeSubagentModel || '', 'Subagent 模型') + '</div>';
         }
 
         function collectProviderSettings(providerType) {

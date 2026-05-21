@@ -174,7 +174,7 @@
                     </div>
                     <div>
                         <div class="settings-page-title">设置</div>
-                        <div class="settings-page-subtitle">管理 AnyBot 的外观、模型、权限、工作区和运行日志</div>
+                        <div class="settings-page-subtitle">管理 AnyBot 的偏好与运行配置</div>
                     </div>
                 </div>
             </div>
@@ -365,31 +365,31 @@
                         </section>
 
                         <section class="settings-tab-panel" data-settings-panel="about" role="tabpanel">
-                            <div class="settings-section-card">
-                                <div class="settings-section-title">版本</div>
-                                <div class="settings-row">
-                                    <span>
-                                        <strong>当前版本</strong>
-                                        <small>安装包内记录的 AnyBot 版本号</small>
-                                    </span>
-                                    <code class="settings-inline-value" id="settings-about-version">加载中…</code>
-                                </div>
-                            </div>
-                            <div class="settings-section-card" id="settings-update-section">
-                                <div class="settings-section-title">更新</div>
-                                <div class="settings-update-card">
-                                    <div class="settings-update-status" id="settings-update-status">加载中…</div>
+                            <div class="settings-section-card settings-about-card" id="settings-update-section">
+                                <div class="settings-about-info">
+                                    <div class="settings-about-item">
+                                        <div class="settings-about-label">当前版本</div>
+                                        <code class="settings-about-value mono" id="settings-about-version">加载中…</code>
+                                    </div>
+                                    <div class="settings-about-item">
+                                        <div class="settings-about-label">更新状态</div>
+                                        <div class="settings-about-value settings-update-status" id="settings-update-status">加载中…</div>
+                                    </div>
+                                    <div class="settings-about-item">
+                                        <div class="settings-about-label">上次检查</div>
+                                        <div class="settings-about-value muted mono" id="settings-update-checked-at">尚未检查</div>
+                                    </div>
                                     <div class="settings-update-progress" id="settings-update-progress" hidden>
                                         <div class="settings-update-progress-bar">
                                             <span id="settings-update-progress-fill"></span>
                                         </div>
                                         <div class="settings-update-progress-text" id="settings-update-progress-text"></div>
                                     </div>
-                                    <div class="settings-button-row settings-update-actions">
-                                        <button class="settings-secondary-btn compact" id="settings-update-check-btn" type="button">检测更新</button>
-                                        <button class="settings-secondary-btn compact" id="settings-update-download-btn" type="button" hidden>下载更新</button>
-                                        <button class="settings-primary-btn compact" id="settings-update-restart-btn" type="button" hidden>重启更新</button>
-                                    </div>
+                                </div>
+                                <div class="settings-button-row settings-update-actions">
+                                    <button class="settings-primary-btn compact" id="settings-update-download-btn" type="button" hidden>立即下载</button>
+                                    <button class="settings-secondary-btn compact" id="settings-update-check-btn" type="button">检查更新</button>
+                                    <button class="settings-primary-btn compact" id="settings-update-restart-btn" type="button" hidden>重启更新</button>
                                 </div>
                             </div>
                         </section>

@@ -1226,6 +1226,17 @@
             border-color: var(--border-hover);
         }
 
+        .settings-secondary-btn:disabled {
+            opacity: 0.55;
+            cursor: default;
+        }
+
+        .settings-secondary-btn:disabled:hover {
+            background: transparent;
+            color: var(--text-muted);
+            border-color: var(--border);
+        }
+
         .settings-primary-btn {
             border: none;
             background: var(--accent);
@@ -1578,12 +1589,14 @@
             min-width: 0;
         }
 
+        .provider-settings-input-control,
         .provider-model-input-control {
             position: relative;
             flex: 0 1 320px;
             min-width: 180px;
         }
 
+        .provider-settings-input-control .settings-inline-input,
         .provider-model-input-control .settings-inline-input {
             width: 100%;
             min-width: 0;
@@ -1656,24 +1669,53 @@
             padding: 0 12px;
         }
 
-        .settings-update-card {
-            margin: 18px 20px;
+        .settings-about-card {
+            min-height: 282px;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(188px, 228px);
+            gap: 24px;
+            padding: 24px 22px;
+        }
+
+        .settings-about-info {
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 24px;
+            min-width: 0;
+        }
+
+        .settings-about-item {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .settings-about-label {
+            color: var(--text-muted);
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.25;
+        }
+
+        .settings-about-value {
+            color: var(--text);
+            font-size: 17px;
+            line-height: 1.35;
+            overflow-wrap: anywhere;
+        }
+
+        .settings-about-value.mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .settings-about-value.muted {
+            color: var(--text-muted);
+            font-size: 14px;
         }
 
         .settings-update-status {
-            min-height: 38px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--input-bg);
             color: var(--text-muted);
-            display: flex;
-            align-items: center;
-            padding: 9px 11px;
-            font-size: 13px;
-            line-height: 1.45;
         }
 
         .settings-update-status.ready {
@@ -1720,8 +1762,14 @@
         }
 
         .settings-update-actions {
+            align-items: flex-end;
+            align-content: flex-end;
+            border-left: 1px solid var(--border);
+            flex-wrap: wrap;
+            gap: 10px;
             justify-content: flex-end;
             margin: 0;
+            padding-left: 24px;
         }
 
         .settings-danger-btn {
@@ -1967,6 +2015,20 @@
             .settings-row {
                 align-items: flex-start;
                 flex-direction: column;
+            }
+
+            .settings-about-card {
+                grid-template-columns: 1fr;
+                min-height: 0;
+                padding: 20px 18px;
+            }
+
+            .settings-update-actions {
+                border-left: none;
+                border-top: 1px solid var(--border);
+                justify-content: flex-start;
+                padding-left: 0;
+                padding-top: 18px;
             }
 
             .settings-inline-input,
