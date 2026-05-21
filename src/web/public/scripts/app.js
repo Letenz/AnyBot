@@ -173,7 +173,11 @@
         let isProjectsCollapsed = localStorage.getItem('projectsCollapsed') === 'true';
         let isHistoryCollapsed = localStorage.getItem('historyCollapsed') === 'true';
         let expandedProjectIds = readStoredSet('expandedProjectIds');
+        let expandedProjectSessionIds = new Set();
+        let isHistorySessionsExpanded = false;
         const SESSION_MESSAGE_PAGE_SIZE = 40;
+        const HISTORY_SESSION_PREVIEW_LIMIT = 4;
+        const PROJECT_SESSION_PREVIEW_LIMIT = 4;
         const LARGE_MESSAGE_PREVIEW_CHARS = 20000;
         const THEME_STORAGE_KEY = 'webuiTheme';
         const THEME_OPTIONS = [
@@ -1981,7 +1985,11 @@
         function renderHistory() {
             historyList.innerHTML = '';
             var globalSessions = sessions.filter(function (s) { return !s.projectId; });
-            var groups = groupSessionsByDate(globalSessions);
+            var sortedGlobalSessions = sortSessionsByUpdatedAt(globalSessions);
+            var visibleSessions = isHistorySessionsExpanded
+                ? sortedGlobalSessions
+                : sortedGlobalSessions.slice(0, HISTORY_SESSION_PREVIEW_LIMIT);
+            var groups = groupSessionsByDate(visibleSessions);
 
             Object.keys(groups).forEach(function (label) {
                 var items = groups[label];
@@ -2001,6 +2009,21 @@
 
                 historyList.appendChild(group);
             });
+
+            if (sortedGlobalSessions.length > HISTORY_SESSION_PREVIEW_LIMIT) {
+                var moreBtn = document.createElement('button');
+                moreBtn.className = 'history-sessions-more';
+                moreBtn.type = 'button';
+                moreBtn.setAttribute('aria-expanded', String(isHistorySessionsExpanded));
+                moreBtn.textContent = isHistorySessionsExpanded
+                    ? '收起'
+                    : '查看更多 ' + (sortedGlobalSessions.length - HISTORY_SESSION_PREVIEW_LIMIT) + ' 条';
+                moreBtn.addEventListener('click', function () {
+                    isHistorySessionsExpanded = !isHistorySessionsExpanded;
+                    renderHistory();
+                });
+                historyList.appendChild(moreBtn);
+            }
         }
 
         function selectProject(projectId) {
@@ -2013,6 +2036,7 @@
 
         function renderProjectSessions(projectId) {
             var list = document.createElement('div');
+            list.className = 'project-session-list';
             var projectSessions = sortSessionsByUpdatedAt(
                 sessions.filter(function (s) { return s.projectId === projectId; })
             );
@@ -2024,7 +2048,12 @@
                 return list;
             }
 
-            projectSessions.forEach(function (s) {
+            var isShowingAll = expandedProjectSessionIds.has(projectId);
+            var visibleSessions = isShowingAll
+                ? projectSessions
+                : projectSessions.slice(0, PROJECT_SESSION_PREVIEW_LIMIT);
+
+            visibleSessions.forEach(function (s) {
                 var btn = document.createElement('div');
                 btn.className = 'project-session-item' + (currentView === 'chat' && s.id === currentSessionId ? ' active' : '');
                 btn.setAttribute('role', 'button');
@@ -2056,6 +2085,26 @@
                 });
                 list.appendChild(btn);
             });
+
+            if (projectSessions.length > PROJECT_SESSION_PREVIEW_LIMIT) {
+                var moreBtn = document.createElement('button');
+                moreBtn.className = 'project-sessions-more';
+                moreBtn.type = 'button';
+                moreBtn.setAttribute('aria-expanded', String(isShowingAll));
+                moreBtn.textContent = isShowingAll
+                    ? '收起'
+                    : '查看更多 ' + (projectSessions.length - PROJECT_SESSION_PREVIEW_LIMIT) + ' 条';
+                moreBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    if (isShowingAll) {
+                        expandedProjectSessionIds.delete(projectId);
+                    } else {
+                        expandedProjectSessionIds.add(projectId);
+                    }
+                    renderProjects();
+                });
+                list.appendChild(moreBtn);
+            }
 
             return list;
         }
