@@ -58,6 +58,8 @@
     },
     "files": [
       "electron/**/*",
+      "build/icons/icon.ico",
+      "build/icons/icon.icns",
       "dist/**/*",
       "package.json",
       "package-lock.json",

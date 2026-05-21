@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, shell } = require("electron");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -7,6 +7,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 let mainWindow = null;
+let tray = null;
 let backendProcess = null;
 let logStream = null;
 let logFilePath = null;
@@ -19,6 +20,9 @@ let autoUpdaterConfigured = false;
 let updateCheckPromise = null;
 let updateDownloadPromise = null;
 let updateDownloadedDialogOpen = false;
+let isQuitting = false;
+let backendReady = false;
+let pendingShowHomeWindow = false;
 
 const DEFAULT_WEB_PORT = 19981;
 const DEFAULT_DESKTOP_SETTINGS = {
@@ -37,6 +41,21 @@ const desktopUpdateState = {
 
 function getAppRoot() {
   return path.resolve(__dirname, "..");
+}
+
+function getAppUrl() {
+  return `http://127.0.0.1:${resolveWebPort()}`;
+}
+
+function resolveAppIconPath() {
+  const iconName = process.platform === "darwin" ? "icon.icns" : "icon.ico";
+  const candidates = [
+    path.join(getAppRoot(), "build", "icons", iconName),
+    path.join(process.resourcesPath || "", "app", "build", "icons", iconName),
+    path.join(process.resourcesPath || "", "build", "icons", iconName),
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
 }
 
 function ensureDir(dir) {
@@ -723,6 +742,7 @@ async function startBackend() {
     backendExitMessage = `Backend exited before the web server started (code=${code}, signal=${signal}).`;
     writeLog("backend", `exited code=${code} signal=${signal}`);
     backendProcess = null;
+    backendReady = false;
   });
 
   await waitForServer(resolveWebPort(), 15000, () => {
@@ -783,11 +803,85 @@ function createMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function createTray() {
+  if (process.platform !== "win32" || tray) {
+    return;
+  }
+
+  const iconPath = resolveAppIconPath();
+  if (!iconPath) {
+    writeLog("tray", "skipped: missing app icon");
+    return;
+  }
+
+  tray = new Tray(iconPath);
+  tray.setToolTip("AnyBot");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "首页",
+        click: () => showMainWindow({ home: true }),
+      },
+      { type: "separator" },
+      {
+        label: "退出",
+        click: quitApp,
+      },
+    ]),
+  );
+  tray.on("click", () => showMainWindow({ home: true }));
+  tray.on("double-click", () => showMainWindow({ home: true }));
+}
+
+function destroyTray() {
+  if (!tray) {
+    return;
+  }
+
+  tray.destroy();
+  tray = null;
+}
+
+function showMainWindow(options = {}) {
+  if (!mainWindow) {
+    createWindow();
+    return;
+  }
+
+  if (options.home) {
+    mainWindow.loadURL(getAppUrl());
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function hideMainWindowToTray(event) {
+  if (!mainWindow || !tray || process.platform !== "win32" || isQuitting) {
+    return;
+  }
+
+  event.preventDefault();
+  mainWindow.hide();
+}
+
+function quitApp() {
+  isQuitting = true;
+  app.quit();
+}
+
 function createWindow() {
-  const port = resolveWebPort();
-  const appUrl = `http://127.0.0.1:${port}`;
+  if (mainWindow) {
+    return mainWindow;
+  }
+
+  const appUrl = getAppUrl();
   const appOrigin = new URL(appUrl).origin;
-  mainWindow = new BrowserWindow({
+  const browserWindowOptions = {
     width: 1280,
     height: 840,
     minWidth: 960,
@@ -799,7 +893,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
-  });
+  };
+  const iconPath = resolveAppIconPath();
+  if (iconPath) {
+    browserWindowOptions.icon = iconPath;
+  }
+
+  mainWindow = new BrowserWindow(browserWindowOptions);
 
   mainWindow.loadURL(appUrl);
   mainWindow.once("ready-to-show", () => mainWindow.show());
@@ -819,9 +919,13 @@ function createWindow() {
     openOutsideApp(url);
   });
 
+  mainWindow.on("close", hideMainWindowToTray);
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+
+  return mainWindow;
 }
 
 function stopBackend() {
@@ -831,40 +935,65 @@ function stopBackend() {
 
   backendProcess.kill("SIGTERM");
   backendProcess = null;
+  backendReady = false;
 }
 
-app.whenReady().then(async () => {
-  try {
-    initLog();
-    prepareUserData();
-    createMenu();
-    const desktopSettings = applyDesktopSettings();
-    await startDesktopUpdateServer().catch((error) => {
-      writeLog("update:server", serializeUpdateError(error));
-    });
-    await startBackend();
-    if (desktopSettings.openWindowOnStart) {
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!backendReady) {
+      pendingShowHomeWindow = true;
+      return;
+    }
+
+    showMainWindow({ home: true });
+  });
+
+  app.whenReady().then(async () => {
+    try {
+      initLog();
+      prepareUserData();
+      createMenu();
+      const desktopSettings = applyDesktopSettings();
+      await startDesktopUpdateServer().catch((error) => {
+        writeLog("update:server", serializeUpdateError(error));
+      });
+      await startBackend();
+      backendReady = true;
+      createTray();
+      if (desktopSettings.openWindowOnStart || pendingShowHomeWindow) {
+        pendingShowHomeWindow = false;
+        createWindow();
+      }
+    } catch (error) {
+      writeLog("main:error", error.stack || error.message);
+      dialog.showErrorBox("AnyBot failed to start", error.message || String(error));
+      quitApp();
+    }
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform === "win32" && tray && !isQuitting) {
+      return;
+    }
+
+    stopBackend();
+    app.quit();
+  });
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0 && backendProcess) {
       createWindow();
     }
-  } catch (error) {
-    writeLog("main:error", error.stack || error.message);
-    dialog.showErrorBox("AnyBot failed to start", error.message || String(error));
-    app.quit();
-  }
-});
+  });
 
-app.on("window-all-closed", () => {
-  stopBackend();
-  app.quit();
-});
-
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0 && backendProcess) {
-    createWindow();
-  }
-});
-
-app.on("before-quit", () => {
-  stopBackend();
-  stopDesktopUpdateServer();
-});
+  app.on("before-quit", () => {
+    isQuitting = true;
+    stopBackend();
+    stopDesktopUpdateServer();
+    destroyTray();
+  });
+}
