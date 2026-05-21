@@ -3125,6 +3125,18 @@
         };
 
         var PROVIDER_MODEL_SUGGESTION_STRATEGIES = [];
+        var PROVIDER_BASE_URL_SUGGESTIONS = [
+            {
+                id: 'deepseek',
+                label: 'DeepSeek',
+                value: 'https://api.deepseek.com/anthropic',
+            },
+            {
+                id: 'vibeapi',
+                label: 'VibeAPI',
+                value: 'https://vibeapi.cc',
+            },
+        ];
         var remoteProviderModelSuggestions = [];
         var remoteProviderModelFetchTimer = null;
         var remoteProviderModelFetchSeq = 0;
@@ -3175,10 +3187,20 @@
                 '</div>';
         }
 
+        function buildProviderBaseUrlInput(value) {
+            return '<div class="provider-model-input-control">' +
+                '<input class="settings-inline-input" id="settings-provider-anthropic-base-url" type="url"' +
+                ' data-provider-base-url-suggestion-input="true" value="' + escapeAttr(value || '') + '"' +
+                ' spellcheck="false" autocomplete="off">' +
+                '<div class="provider-model-suggest-menu" role="listbox"></div>' +
+                '</div>';
+        }
+
         function closeProviderModelSuggestionMenus() {
             Array.prototype.forEach.call(document.querySelectorAll('.provider-model-input-control.open'), function (control) {
                 control.classList.remove('open');
                 var input = control.querySelector('[data-provider-model-suggestion-input="true"]');
+                if (!input) input = control.querySelector('[data-provider-base-url-suggestion-input="true"]');
                 if (input) input.setAttribute('aria-expanded', 'false');
             });
         }
@@ -3290,6 +3312,42 @@
             input.setAttribute('aria-expanded', 'true');
         }
 
+        function showProviderBaseUrlSuggestionMenu(input) {
+            if (!input) return;
+            var control = input.closest('.provider-model-input-control');
+            if (!control) return;
+            var menu = control.querySelector('.provider-model-suggest-menu');
+            if (!menu) return;
+
+            closeProviderModelSuggestionMenus();
+            menu.innerHTML = '';
+            PROVIDER_BASE_URL_SUGGESTIONS.forEach(function (suggestion) {
+                var option = document.createElement('button');
+                option.className = 'provider-model-suggest-option';
+                option.type = 'button';
+                option.setAttribute('role', 'option');
+                option.dataset.value = suggestion.value;
+                option.innerHTML =
+                    '<span class="provider-model-suggest-name">' + escapeHtml(suggestion.label) + '</span>' +
+                    '<span class="provider-model-suggest-source">' + escapeHtml(suggestion.value) + '</span>';
+                option.addEventListener('mousedown', function (e) {
+                    e.preventDefault();
+                });
+                option.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    input.value = suggestion.value;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    closeProviderModelSuggestionMenus();
+                    input.focus();
+                });
+                option.addEventListener('keydown', handleProviderModelSuggestionOptionKeydown);
+                menu.appendChild(option);
+            });
+            control.classList.add('open');
+            input.setAttribute('aria-expanded', 'true');
+        }
+
         function getOpenProviderModelSuggestionOptions() {
             var menu = document.querySelector('.provider-model-input-control.open .provider-model-suggest-menu');
             return menu ? Array.prototype.slice.call(menu.querySelectorAll('.provider-model-suggest-option')) : [];
@@ -3298,7 +3356,13 @@
         function handleProviderModelSuggestionInputKeydown(e) {
             if (e.key === 'ArrowDown') {
                 var options = getOpenProviderModelSuggestionOptions();
-                if (options.length === 0) showProviderModelSuggestionMenu(e.currentTarget);
+                if (options.length === 0) {
+                    if (e.currentTarget.matches('[data-provider-base-url-suggestion-input="true"]')) {
+                        showProviderBaseUrlSuggestionMenu(e.currentTarget);
+                    } else {
+                        showProviderModelSuggestionMenu(e.currentTarget);
+                    }
+                }
                 options = getOpenProviderModelSuggestionOptions();
                 if (options.length > 0) {
                     e.preventDefault();
@@ -3324,6 +3388,7 @@
                 e.preventDefault();
                 var control = e.currentTarget.closest('.provider-model-input-control');
                 var input = control && control.querySelector('[data-provider-model-suggestion-input="true"]');
+                if (!input) input = control && control.querySelector('[data-provider-base-url-suggestion-input="true"]');
                 closeProviderModelSuggestionMenus();
                 if (input) input.focus();
             }
@@ -3344,6 +3409,16 @@
                     var openInput = document.querySelector('.provider-model-input-control.open [data-provider-model-suggestion-input="true"]');
                     if (openInput) showProviderModelSuggestionMenu(openInput);
                 });
+                baseUrlInput.setAttribute('aria-haspopup', 'listbox');
+                baseUrlInput.setAttribute('aria-expanded', 'false');
+                baseUrlInput.addEventListener('focus', function () {
+                    showProviderBaseUrlSuggestionMenu(baseUrlInput);
+                });
+                baseUrlInput.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    showProviderBaseUrlSuggestionMenu(baseUrlInput);
+                });
+                baseUrlInput.addEventListener('keydown', handleProviderModelSuggestionInputKeydown);
             }
             if (apiKeyInput) {
                 apiKeyInput.addEventListener('input', function () {
@@ -3429,7 +3504,7 @@
 
         function buildClaudeCodeCompatFields(cfg) {
             return '<label class="settings-row"><span><strong>Anthropic Base URL</strong><small>兼容 Anthropic API 的服务地址</small></span>' +
-                '<input class="settings-inline-input" id="settings-provider-anthropic-base-url" type="url" value="' + escapeAttr(cfg.anthropicBaseUrl || '') + '" spellcheck="false"></label>' +
+                buildProviderBaseUrlInput(cfg.anthropicBaseUrl || '') + '</label>' +
                 '<label class="settings-row"><span><strong>API Key</strong><small>访问兼容服务所需的密钥</small></span>' +
                 '<input class="settings-inline-input" id="settings-provider-api-key" type="password" value="' + escapeAttr(cfg.apiKey || '') + '"></label>' +
                 '<label class="settings-row"><span><strong>Auto 模型</strong><small>用于 Auto 模型</small></span>' +
