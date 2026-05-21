@@ -3322,8 +3322,8 @@
 
         function buildClaudeCodeCompatToggle(cfg) {
             var checked = cfg.anthropicCompatEnabled === true;
-            return '<div class="settings-row compat-toggle-row"><span><strong>自定义 Anthropic 兼容接口</strong><small>开启后使用下方 URL、密钥和模型映射</small></span>' +
-                '<label class="settings-switch" aria-label="自定义 Anthropic 兼容接口">' +
+            return '<div class="settings-row compat-toggle-row"><span><strong>Anthropic 兼容接口</strong><small>开启后使用下方 URL、密钥和模型映射</small></span>' +
+                '<label class="settings-switch" aria-label="Anthropic 兼容接口">' +
                 '<input id="settings-provider-anthropic-compat-enabled" type="checkbox"' + (checked ? ' checked' : '') + '>' +
                 '<span class="settings-switch-slider"></span>' +
                 '</label></div>';
