@@ -2,11 +2,11 @@
 
 # AnyBot
 
-把 AI CLI 工具变成可远程使用的 AI 助手——通过内置 **Web UI** 在浏览器里对话，或通过 **飞书机器人** / **QQ 机器人** / **Telegram 机器人** / **个人微信** 在手机 / 桌面端随时向你这台机器上的 AI 发消息。
+把 AI CLI 工具变成可远程使用的 AI 助手——安装桌面 App 后即可通过内置 **Web UI** 对话和配置，也可以通过 **飞书机器人** / **QQ 机器人** / **Telegram 机器人** / **个人微信** 在手机 / 桌面端随时向你这台机器上的 AI 发消息。
 
 目前支持 [OpenAI Codex CLI](https://github.com/openai/codex) 和 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 作为 Provider。
 
-支持 **macOS**、**Linux** 和 **Windows**。
+桌面 App 支持 **macOS** 和 **Windows**；源码运行支持 **macOS**、**Linux** 和 **Windows**。
 
 ---
 
@@ -51,12 +51,30 @@
 
 ## 快速开始
 
-### 1. 前置依赖
+### 1. 安装桌面 App（推荐）
 
-| 依赖 | 最低版本 | 说明 |
-|------|---------|------|
-| [Node.js](https://nodejs.org/) | 18+ | 运行环境 |
-| npm | 随 Node.js 附带 | 包管理 |
+从 [GitHub Releases](https://github.com/1935417243/AnyBot/releases) 下载对应平台的安装包：
+
+| 平台 | 安装包 | 说明 |
+|------|--------|------|
+| Windows | `AnyBot-Setup-x.x.x.exe` | 双击安装，之后从开始菜单或桌面快捷方式启动 |
+| macOS | `AnyBot-x.x.x-*.dmg` | 打开 `.dmg`，将 `AnyBot.app` 拖到 Applications 后启动 |
+
+启动后会自动打开 AnyBot 桌面窗口。Provider、模型、权限、代理和频道都可以在设置中配置。
+
+Windows 安装版支持在 **设置 -> 关于 -> 检测更新** 中检查新版本；macOS 暂时请手动下载新版 `.dmg` 覆盖安装。
+
+#### macOS 提示“应用已损坏，无法打开”
+
+由于 macOS 的安全机制，非 App Store 下载的应用可能会触发此提示。如果你确认安装包来自 AnyBot 的 GitHub Releases，可以在终端执行以下命令清除隔离标记：
+
+```bash
+sudo xattr -rd com.apple.quarantine "/Applications/AnyBot.app"
+```
+
+如果你的 Applications 中应用名显示为 `Anybot.app`，请把命令里的路径改成实际名称。
+
+### 2. Provider 前置依赖
 
 以及至少配置一个 Provider：
 
@@ -64,6 +82,17 @@
 |----------|---------|------|
 | [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | OpenAI 的 CLI 工具 |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 使用本机已登录的 `claude` 命令；项目依赖已包含 SDK | Anthropic 的 CLI 工具 |
+
+桌面 App 不要求用户手动安装 Node.js；只有源码运行或开发时才需要 Node.js 和 npm。
+
+### 3. 源码运行
+
+源码运行需要先安装：
+
+| 依赖 | 最低版本 | 说明 |
+|------|---------|------|
+| [Node.js](https://nodejs.org/) | 18+ | 运行环境 |
+| npm | 随 Node.js 附带 | 包管理 |
 
 <details>
 <summary><b>Windows 安装指南</b></summary>
@@ -110,8 +139,6 @@ brew install node
 
 </details>
 
-### 2. 源码运行
-
 ```bash
 git clone https://github.com/1935417243/AnyBot.git
 cd AnyBot
@@ -121,7 +148,7 @@ npm start
 
 启动后打开 `http://localhost:19981` 即可使用 Web UI。Provider、模型、权限、代理和频道都在 Web UI 中配置。
 
-### 3. 后台运行
+### 4. 后台运行
 
 ```bash
 # 后台运行（daemon）

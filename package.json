@@ -1,6 +1,6 @@
 {
   "name": "anybot",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -92,6 +92,7 @@
       "icon": "build/icons/icon.ico"
     },
     "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
