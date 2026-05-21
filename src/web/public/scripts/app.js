@@ -1846,25 +1846,6 @@
             }
         }
 
-        function groupSessionsByDate(list) {
-            var now = new Date();
-            var today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-            var yesterday = today - 86400000;
-            var weekAgo = today - 7 * 86400000;
-
-            var groups = {'今天': [], '昨天': [], '上周': [], '更早': []};
-
-            sortSessionsByUpdatedAt(list).forEach(function (s) {
-                var t = getSessionSortTime(s);
-                if (t >= today) groups['今天'].push(s);
-                else if (t >= yesterday) groups['昨天'].push(s);
-                else if (t >= weekAgo) groups['上周'].push(s);
-                else groups['更早'].push(s);
-            });
-
-            return groups;
-        }
-
         function getSessionSortTime(s) {
             return Number(s.updatedAt || s.createdAt || 0);
         }
@@ -1910,13 +1891,35 @@
                 : '<svg class="project-icon" viewBox="0 0 16 16" fill="none"><path d="M2.4 12.7V3.6c0-.6.5-1.1 1.1-1.1h3l1.4 1.6h4.6c.6 0 1.1.5 1.1 1.1v7.5H2.4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
         }
 
+        function isSameLocalDate(a, b) {
+            return a.getFullYear() === b.getFullYear()
+                && a.getMonth() === b.getMonth()
+                && a.getDate() === b.getDate();
+        }
+
         function formatRelativeAge(ts) {
-            var diff = Date.now() - (ts || Date.now());
-            var days = Math.max(0, Math.floor(diff / 86400000));
-            if (days === 0) return '今天';
-            if (days < 30) return days + ' 天';
-            var months = Math.floor(days / 30);
-            return months + ' 月';
+            var value = Number(ts || Date.now());
+            if (!Number.isFinite(value) || value <= 0) value = Date.now();
+
+            var now = new Date();
+            var date = new Date(value);
+            if (Number.isNaN(date.getTime())) date = now;
+
+            var minute = 60000;
+            var hour = 60 * minute;
+            var day = 24 * hour;
+            var diff = Math.max(0, now.getTime() - date.getTime());
+
+            if (diff < minute) return '刚刚';
+            if (diff < hour) return Math.floor(diff / minute) + '分';
+            if (diff < day) return Math.floor(diff / hour) + '时';
+            if (isSameLocalDate(date, now)) return '今天';
+
+            var days = Math.floor(diff / day);
+            if (days < 7) return Math.max(1, days) + '天';
+            if (days < 28) return Math.floor(days / 7) + '周';
+            if (days < 365) return Math.min(11, Math.max(1, Math.floor(days / 30))) + '月前';
+            return '历史';
         }
 
         function updateProjectsCollapsedState() {
@@ -1964,6 +1967,10 @@
             text.className = 'history-item-text';
             text.textContent = s.title;
 
+            var age = document.createElement('span');
+            age.className = 'history-item-age';
+            age.textContent = formatRelativeAge(s.updatedAt || s.createdAt);
+
             var del = document.createElement('button');
             del.className = 'history-item-delete';
             del.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
@@ -1973,6 +1980,7 @@
             });
 
             item.appendChild(text);
+            item.appendChild(age);
             item.appendChild(del);
 
             item.addEventListener('click', function () {
@@ -1989,25 +1997,8 @@
             var visibleSessions = isHistorySessionsExpanded
                 ? sortedGlobalSessions
                 : sortedGlobalSessions.slice(0, HISTORY_SESSION_PREVIEW_LIMIT);
-            var groups = groupSessionsByDate(visibleSessions);
-
-            Object.keys(groups).forEach(function (label) {
-                var items = groups[label];
-                if (items.length === 0) return;
-
-                var group = document.createElement('div');
-                group.className = 'history-group';
-
-                var groupLabel = document.createElement('div');
-                groupLabel.className = 'history-group-label';
-                groupLabel.textContent = label;
-                group.appendChild(groupLabel);
-
-                items.forEach(function (s) {
-                    group.appendChild(createHistoryItem(s));
-                });
-
-                historyList.appendChild(group);
+            visibleSessions.forEach(function (s) {
+                historyList.appendChild(createHistoryItem(s));
             });
 
             if (sortedGlobalSessions.length > HISTORY_SESSION_PREVIEW_LIMIT) {
