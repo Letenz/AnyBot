@@ -105,7 +105,9 @@
         const settingsImportFile = document.getElementById('settings-import-file');
         const settingsClearHistoryBtn = document.getElementById('settings-clear-history-btn');
         const settingsAboutVersion = document.getElementById('settings-about-version');
+        const settingsAboutPlatformRow = document.getElementById('settings-about-platform-row');
         const settingsAboutPlatform = document.getElementById('settings-about-platform');
+        const settingsUpdateSection = document.getElementById('settings-update-section');
         const settingsUpdateStatus = document.getElementById('settings-update-status');
         const settingsUpdateProgress = document.getElementById('settings-update-progress');
         const settingsUpdateProgressFill = document.getElementById('settings-update-progress-fill');
@@ -158,6 +160,10 @@
         let inputHistoryNavigationPromise = null;
         let inputHistoryNavigationVersion = 0;
         let skillPickerOpen = false;
+        const isDesktopAppClient = /\bElectron\//i.test(navigator.userAgent || '');
+
+        if (settingsAboutPlatformRow) settingsAboutPlatformRow.hidden = !isDesktopAppClient;
+        if (settingsUpdateSection) settingsUpdateSection.hidden = !isDesktopAppClient;
         let skillPickerQuery = '';
         let skillPickerTokenStart = null;
         let skillPickerTokenEnd = null;
@@ -2738,7 +2744,7 @@
             provider: ['提供商', '提供商配置'],
             workspace: ['工作区', '默认工作目录和项目入口'],
             privacy: ['隐私与日志', '日志目录和清理操作'],
-            about: ['关于', '版本信息和 Windows 自动更新'],
+            about: ['关于', isDesktopAppClient ? '版本信息和 Windows 自动更新' : '版本信息'],
         };
 
         function createDefaultAppSettings() {
@@ -2904,6 +2910,12 @@
             var state = status && status.state;
             var progress = status && status.progress;
 
+            if (settingsAboutPlatformRow) {
+                settingsAboutPlatformRow.hidden = !isDesktopAppClient;
+            }
+            if (settingsUpdateSection) {
+                settingsUpdateSection.hidden = !isDesktopAppClient;
+            }
             if (settingsAboutVersion) {
                 settingsAboutVersion.textContent = status && status.currentVersion ? status.currentVersion : '未知';
             }
@@ -3020,7 +3032,7 @@
 
         function updateDesktopUpdatePolling() {
             var state = desktopUpdateStatus && desktopUpdateStatus.state;
-            var shouldPoll = activeSettingsTab === 'about' && (state === 'checking' || state === 'downloading');
+            var shouldPoll = isDesktopAppClient && activeSettingsTab === 'about' && (state === 'checking' || state === 'downloading');
             if (!shouldPoll) {
                 if (desktopUpdatePollTimer) {
                     clearInterval(desktopUpdatePollTimer);
