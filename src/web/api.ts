@@ -67,6 +67,66 @@ const MESSAGE_PREVIEW_CHARS = 20000;
 const WORKSPACE_MEMORY_FILES = ["AGENTS.md", "MEMORY.md", "PROFILE.md", "BOOTSTRAP.md"] as const;
 const activeRunControllers = new Map<string, AbortController>();
 
+function getDesktopUpdateUnavailableStatus(): Record<string, unknown> {
+  return {
+    platform: process.platform,
+    supported: false,
+    packaged: false,
+    currentVersion: process.env.ANYBOT_DESKTOP_APP_VERSION || process.env.npm_package_version || "0.0.0",
+    state: process.platform === "darwin" ? "unsupported" : "unavailable",
+    message:
+      process.platform === "darwin"
+        ? "macOS 暂不支持应用内自动更新，请手动下载安装包覆盖安装。"
+        : "桌面更新只在 Windows 安装版中可用。",
+    latestVersion: null,
+    updateInfo: null,
+    progress: null,
+    error: null,
+  };
+}
+
+async function proxyDesktopUpdate(
+  endpoint: "/status" | "/check" | "/download" | "/restart",
+  method: "GET" | "POST",
+  res: Response,
+): Promise<void> {
+  const baseUrl = process.env.ANYBOT_DESKTOP_UPDATE_URL;
+  const token = process.env.ANYBOT_DESKTOP_UPDATE_TOKEN;
+
+  if (!baseUrl || !token) {
+    res.json(getDesktopUpdateUnavailableStatus());
+    return;
+  }
+
+  try {
+    const response = await undiciFetch(new URL(endpoint, baseUrl).toString(), {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const text = await response.text();
+    let payload: unknown = {};
+    try {
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = { error: text || "桌面更新服务返回了无效响应" };
+    }
+    res.status(response.status).json(payload);
+  } catch (error) {
+    logger.warn("desktop_update.proxy_failed", {
+      endpoint,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    res.status(502).json({
+      ...getDesktopUpdateUnavailableStatus(),
+      state: "error",
+      message: "连接桌面更新服务失败。",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 // 图片扩展名集合
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff", ".tif", ".heic", ".heif", ".avif"]);
 
@@ -618,6 +678,22 @@ export function chatRouter(): Router {
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : "保存设置失败" });
     }
+  });
+
+  router.get("/desktop-update/status", async (_req: Request, res: Response) => {
+    await proxyDesktopUpdate("/status", "GET", res);
+  });
+
+  router.post("/desktop-update/check", async (_req: Request, res: Response) => {
+    await proxyDesktopUpdate("/check", "POST", res);
+  });
+
+  router.post("/desktop-update/download", async (_req: Request, res: Response) => {
+    await proxyDesktopUpdate("/download", "POST", res);
+  });
+
+  router.post("/desktop-update/restart", async (_req: Request, res: Response) => {
+    await proxyDesktopUpdate("/restart", "POST", res);
   });
 
   router.post("/app-settings/default-workdir/pick", async (_req: Request, res: Response) => {

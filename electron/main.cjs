@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
@@ -9,11 +10,29 @@ let mainWindow = null;
 let backendProcess = null;
 let logStream = null;
 let logFilePath = null;
+let desktopUpdateServer = null;
+let desktopUpdateUrl = "";
+let desktopUpdateToken = "";
+let autoUpdaterInstance = undefined;
+let autoUpdaterLoadError = null;
+let autoUpdaterConfigured = false;
+let updateCheckPromise = null;
+let updateDownloadPromise = null;
+let updateDownloadedDialogOpen = false;
 
 const DEFAULT_WEB_PORT = 19981;
 const DEFAULT_DESKTOP_SETTINGS = {
   openAtLogin: false,
   openWindowOnStart: true,
+};
+const DESKTOP_UPDATE_PLATFORM = "win32";
+const desktopUpdateState = {
+  state: "idle",
+  message: "",
+  latestVersion: null,
+  updateInfo: null,
+  progress: null,
+  error: null,
 };
 
 function getAppRoot() {
@@ -120,6 +139,441 @@ function applyDesktopSettings() {
   }
 
   return settings;
+}
+
+function getAutoUpdater() {
+  if (autoUpdaterInstance !== undefined) {
+    return autoUpdaterInstance;
+  }
+
+  try {
+    autoUpdaterInstance = require("electron-updater").autoUpdater;
+  } catch (error) {
+    autoUpdaterLoadError = error;
+    autoUpdaterInstance = null;
+  }
+
+  return autoUpdaterInstance;
+}
+
+function summarizeUpdateInfo(info) {
+  if (!info) {
+    return null;
+  }
+
+  return {
+    version: info.version || null,
+    releaseName: info.releaseName || null,
+    releaseDate: info.releaseDate || null,
+  };
+}
+
+function serializeUpdateError(error) {
+  if (!error) {
+    return null;
+  }
+  return error.stack || error.message || String(error);
+}
+
+function getDesktopUpdateAvailability() {
+  if (process.platform !== DESKTOP_UPDATE_PLATFORM) {
+    const platformName = process.platform === "darwin" ? "macOS" : process.platform;
+    return {
+      ok: false,
+      state: "unsupported",
+      message: `${platformName} 暂不支持应用内自动更新，请手动下载安装包覆盖安装。`,
+    };
+  }
+
+  if (!app.isPackaged) {
+    return {
+      ok: false,
+      state: "unavailable",
+      message: "开发模式不能检查更新，请在 Windows 安装版中使用。",
+    };
+  }
+
+  const updater = getAutoUpdater();
+  if (!updater) {
+    return {
+      ok: false,
+      state: "unavailable",
+      message: `更新组件不可用：${serializeUpdateError(autoUpdaterLoadError) || "electron-updater 未加载"}`,
+    };
+  }
+
+  return { ok: true, updater };
+}
+
+function getDesktopUpdateStatus() {
+  const availability = getDesktopUpdateAvailability();
+  const state = availability.ok ? desktopUpdateState.state : availability.state;
+  const message = availability.ok ? desktopUpdateState.message : availability.message;
+
+  return {
+    platform: process.platform,
+    supported: availability.ok,
+    packaged: app.isPackaged,
+    currentVersion: app.getVersion(),
+    state,
+    message,
+    latestVersion: desktopUpdateState.latestVersion,
+    updateInfo: desktopUpdateState.updateInfo,
+    progress: desktopUpdateState.progress,
+    error: desktopUpdateState.error,
+  };
+}
+
+function setDesktopUpdateState(nextState) {
+  Object.assign(desktopUpdateState, nextState);
+}
+
+function showUpdateDownloadedDialog() {
+  if (updateDownloadedDialogOpen) {
+    return;
+  }
+
+  updateDownloadedDialogOpen = true;
+  const options = {
+    type: "info",
+    buttons: ["立即重启更新", "稍后"],
+    defaultId: 0,
+    cancelId: 1,
+    message: "AnyBot 新版本已下载完成",
+    detail: "重启后会安装更新。",
+  };
+  const messageBoxPromise = mainWindow
+    ? dialog.showMessageBox(mainWindow, options)
+    : dialog.showMessageBox(options);
+
+  messageBoxPromise
+    .then(({ response }) => {
+      if (response === 0) {
+        const updater = getAutoUpdater();
+        if (updater) {
+          setDesktopUpdateState({ state: "restarting", message: "正在重启并安装更新..." });
+          updater.quitAndInstall(false, true);
+        }
+      }
+    })
+    .catch((error) => {
+      writeLog("update:dialog", serializeUpdateError(error));
+    })
+    .finally(() => {
+      updateDownloadedDialogOpen = false;
+    });
+}
+
+function ensureAutoUpdaterConfigured(updater) {
+  if (autoUpdaterConfigured) {
+    return;
+  }
+
+  autoUpdaterConfigured = true;
+  updater.autoDownload = false;
+  updater.autoInstallOnAppQuit = false;
+
+  updater.on("checking-for-update", () => {
+    setDesktopUpdateState({
+      state: "checking",
+      message: "正在检测更新...",
+      error: null,
+      progress: null,
+    });
+    writeLog("update", "checking for update");
+  });
+
+  updater.on("update-available", (info) => {
+    const updateInfo = summarizeUpdateInfo(info);
+    setDesktopUpdateState({
+      state: "available",
+      message: `发现新版本 ${updateInfo?.version || ""}`.trim(),
+      latestVersion: updateInfo?.version || null,
+      updateInfo,
+      progress: null,
+      error: null,
+    });
+    writeLog("update", `available ${updateInfo?.version || "unknown"}`);
+  });
+
+  updater.on("update-not-available", (info) => {
+    const updateInfo = summarizeUpdateInfo(info);
+    setDesktopUpdateState({
+      state: "not-available",
+      message: "当前已是最新版本。",
+      latestVersion: updateInfo?.version || null,
+      updateInfo,
+      progress: null,
+      error: null,
+    });
+    writeLog("update", "not available");
+  });
+
+  updater.on("download-progress", (progress) => {
+    setDesktopUpdateState({
+      state: "downloading",
+      message: "正在下载更新...",
+      progress: {
+        percent: Number.isFinite(progress.percent) ? progress.percent : 0,
+        transferred: progress.transferred || 0,
+        total: progress.total || 0,
+        bytesPerSecond: progress.bytesPerSecond || 0,
+      },
+      error: null,
+    });
+  });
+
+  updater.on("update-downloaded", (info) => {
+    const updateInfo = summarizeUpdateInfo(info);
+    setDesktopUpdateState({
+      state: "downloaded",
+      message: "更新已下载，重启后安装。",
+      latestVersion: updateInfo?.version || desktopUpdateState.latestVersion,
+      updateInfo: updateInfo || desktopUpdateState.updateInfo,
+      progress: null,
+      error: null,
+    });
+    writeLog("update", `downloaded ${updateInfo?.version || "unknown"}`);
+    showUpdateDownloadedDialog();
+  });
+
+  updater.on("error", (error) => {
+    const message = serializeUpdateError(error);
+    setDesktopUpdateState({
+      state: "error",
+      message: "更新失败。",
+      error: message,
+      progress: null,
+    });
+    writeLog("update:error", message);
+  });
+}
+
+async function checkDesktopUpdate() {
+  const availability = getDesktopUpdateAvailability();
+  if (!availability.ok) {
+    return getDesktopUpdateStatus();
+  }
+
+  const updater = availability.updater;
+  ensureAutoUpdaterConfigured(updater);
+
+  if (updateCheckPromise) {
+    return updateCheckPromise;
+  }
+
+  updateCheckPromise = (async () => {
+    setDesktopUpdateState({
+      state: "checking",
+      message: "正在检测更新...",
+      error: null,
+      progress: null,
+    });
+
+    try {
+      const result = await updater.checkForUpdates();
+      if (desktopUpdateState.state === "checking") {
+        const updateInfo = summarizeUpdateInfo(result?.updateInfo);
+        setDesktopUpdateState({
+          state: "not-available",
+          message: "当前已是最新版本。",
+          latestVersion: updateInfo?.version || null,
+          updateInfo,
+          progress: null,
+          error: null,
+        });
+      }
+    } catch (error) {
+      const message = serializeUpdateError(error);
+      setDesktopUpdateState({
+        state: "error",
+        message: "检测更新失败。",
+        error: message,
+        progress: null,
+      });
+      writeLog("update:error", message);
+    } finally {
+      updateCheckPromise = null;
+    }
+
+    return getDesktopUpdateStatus();
+  })();
+
+  return updateCheckPromise;
+}
+
+function downloadDesktopUpdate() {
+  const availability = getDesktopUpdateAvailability();
+  if (!availability.ok) {
+    return getDesktopUpdateStatus();
+  }
+
+  const updater = availability.updater;
+  ensureAutoUpdaterConfigured(updater);
+
+  if (desktopUpdateState.state === "downloaded" || desktopUpdateState.state === "restarting") {
+    return getDesktopUpdateStatus();
+  }
+
+  if (desktopUpdateState.state !== "available") {
+    setDesktopUpdateState({
+      state: "error",
+      message: "请先检测到可用的新版本。",
+      error: "No available update is ready to download.",
+      progress: null,
+    });
+    return getDesktopUpdateStatus();
+  }
+
+  if (!desktopUpdateState.updateInfo) {
+    setDesktopUpdateState({
+      state: "error",
+      message: "请先检测更新。",
+      error: "No update info is available. Check for updates before downloading.",
+      progress: null,
+    });
+    return getDesktopUpdateStatus();
+  }
+
+  if (updateDownloadPromise) {
+    return getDesktopUpdateStatus();
+  }
+
+  setDesktopUpdateState({
+    state: "downloading",
+    message: "正在下载更新...",
+    progress: { percent: 0, transferred: 0, total: 0, bytesPerSecond: 0 },
+    error: null,
+  });
+
+  updateDownloadPromise = updater
+    .downloadUpdate()
+    .catch((error) => {
+      const message = serializeUpdateError(error);
+      setDesktopUpdateState({
+        state: "error",
+        message: "下载更新失败。",
+        error: message,
+        progress: null,
+      });
+      writeLog("update:error", message);
+    })
+    .finally(() => {
+      updateDownloadPromise = null;
+    });
+
+  return getDesktopUpdateStatus();
+}
+
+function restartToInstallDesktopUpdate() {
+  const availability = getDesktopUpdateAvailability();
+  if (!availability.ok) {
+    return getDesktopUpdateStatus();
+  }
+
+  if (desktopUpdateState.state !== "downloaded") {
+    setDesktopUpdateState({
+      state: "error",
+      message: "更新还没有下载完成。",
+      error: "No downloaded update is ready to install.",
+      progress: null,
+    });
+    return getDesktopUpdateStatus();
+  }
+
+  setDesktopUpdateState({
+    state: "restarting",
+    message: "正在重启并安装更新...",
+    error: null,
+    progress: null,
+  });
+
+  setImmediate(() => {
+    availability.updater.quitAndInstall(false, true);
+  });
+
+  return getDesktopUpdateStatus();
+}
+
+function writeJsonResponse(res, statusCode, payload) {
+  const body = JSON.stringify(payload);
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Content-Length": Buffer.byteLength(body),
+  });
+  res.end(body);
+}
+
+async function handleDesktopUpdateRequest(req, res) {
+  req.resume();
+
+  if (req.headers.authorization !== `Bearer ${desktopUpdateToken}`) {
+    writeJsonResponse(res, 401, { error: "Unauthorized" });
+    return;
+  }
+
+  const requestUrl = new URL(req.url || "/", "http://127.0.0.1");
+  const route = `${req.method || "GET"} ${requestUrl.pathname}`;
+
+  if (route === "GET /status") {
+    writeJsonResponse(res, 200, getDesktopUpdateStatus());
+    return;
+  }
+
+  if (route === "POST /check") {
+    writeJsonResponse(res, 200, await checkDesktopUpdate());
+    return;
+  }
+
+  if (route === "POST /download") {
+    writeJsonResponse(res, 200, downloadDesktopUpdate());
+    return;
+  }
+
+  if (route === "POST /restart") {
+    writeJsonResponse(res, 200, restartToInstallDesktopUpdate());
+    return;
+  }
+
+  writeJsonResponse(res, 404, { error: "Not found" });
+}
+
+function startDesktopUpdateServer() {
+  if (desktopUpdateServer) {
+    return Promise.resolve();
+  }
+
+  desktopUpdateToken = crypto.randomBytes(24).toString("hex");
+  desktopUpdateServer = http.createServer((req, res) => {
+    handleDesktopUpdateRequest(req, res).catch((error) => {
+      writeLog("update:server", serializeUpdateError(error));
+      writeJsonResponse(res, 500, { error: "Desktop update request failed" });
+    });
+  });
+
+  return new Promise((resolve, reject) => {
+    desktopUpdateServer.once("error", reject);
+    desktopUpdateServer.listen(0, "127.0.0.1", () => {
+      const address = desktopUpdateServer.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Desktop update server did not expose a TCP port"));
+        return;
+      }
+      desktopUpdateUrl = `http://127.0.0.1:${address.port}`;
+      desktopUpdateServer.off("error", reject);
+      writeLog("update:server", `listening on ${desktopUpdateUrl}`);
+      resolve();
+    });
+  });
+}
+
+function stopDesktopUpdateServer() {
+  if (!desktopUpdateServer) {
+    return;
+  }
+
+  desktopUpdateServer.close();
+  desktopUpdateServer = null;
 }
 
 function shouldOpenOutsideApp(url, appOrigin) {
@@ -237,6 +691,9 @@ async function startBackend() {
     ...process.env,
     ANYBOT_DESKTOP: "1",
     ANYBOT_DESKTOP_PARENT_PID: String(process.pid),
+    ANYBOT_DESKTOP_APP_VERSION: app.getVersion(),
+    ANYBOT_DESKTOP_UPDATE_URL: desktopUpdateUrl,
+    ANYBOT_DESKTOP_UPDATE_TOKEN: desktopUpdateToken,
     DATA_DIR: dataDir,
     CODEX_DATA_DIR: dataDir,
     LOG_DIR: runDir,
@@ -382,6 +839,9 @@ app.whenReady().then(async () => {
     prepareUserData();
     createMenu();
     const desktopSettings = applyDesktopSettings();
+    await startDesktopUpdateServer().catch((error) => {
+      writeLog("update:server", serializeUpdateError(error));
+    });
     await startBackend();
     if (desktopSettings.openWindowOnStart) {
       createWindow();
@@ -406,4 +866,5 @@ app.on("activate", () => {
 
 app.on("before-quit", () => {
   stopBackend();
+  stopDesktopUpdateServer();
 });

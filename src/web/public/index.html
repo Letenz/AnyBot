@@ -185,6 +185,7 @@
                         <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="provider">提供商</button>
                         <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="workspace">工作区</button>
                         <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="privacy">隐私与日志</button>
+                        <button class="settings-nav-item" type="button" role="tab" aria-selected="false" data-settings-tab="about">关于</button>
                     </div>
                 </aside>
                 <div class="settings-main">
@@ -359,6 +360,43 @@
                                 <div class="settings-button-row">
                                     <button class="settings-secondary-btn compact" id="settings-open-logs-btn" type="button">打开日志目录</button>
                                     <button class="settings-danger-btn compact" id="settings-clear-logs-btn" type="button">清空日志</button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="settings-tab-panel" data-settings-panel="about" role="tabpanel">
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">版本</div>
+                                <div class="settings-row">
+                                    <span>
+                                        <strong>当前版本</strong>
+                                        <small>安装包内记录的 AnyBot 版本号</small>
+                                    </span>
+                                    <code class="settings-inline-value" id="settings-about-version">加载中…</code>
+                                </div>
+                                <div class="settings-row">
+                                    <span>
+                                        <strong>运行平台</strong>
+                                        <small>目前仅 Windows 安装版支持应用内更新</small>
+                                    </span>
+                                    <code class="settings-inline-value" id="settings-about-platform">加载中…</code>
+                                </div>
+                            </div>
+                            <div class="settings-section-card">
+                                <div class="settings-section-title">更新</div>
+                                <div class="settings-update-card">
+                                    <div class="settings-update-status" id="settings-update-status">加载中…</div>
+                                    <div class="settings-update-progress" id="settings-update-progress" hidden>
+                                        <div class="settings-update-progress-bar">
+                                            <span id="settings-update-progress-fill"></span>
+                                        </div>
+                                        <div class="settings-update-progress-text" id="settings-update-progress-text"></div>
+                                    </div>
+                                    <div class="settings-button-row settings-update-actions">
+                                        <button class="settings-secondary-btn compact" id="settings-update-check-btn" type="button">检测更新</button>
+                                        <button class="settings-secondary-btn compact" id="settings-update-download-btn" type="button" hidden>下载更新</button>
+                                        <button class="settings-primary-btn compact" id="settings-update-restart-btn" type="button" hidden>重启更新</button>
+                                    </div>
                                 </div>
                             </div>
                         </section>

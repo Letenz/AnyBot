@@ -104,6 +104,15 @@
         const settingsImportDataBtn = document.getElementById('settings-import-data-btn');
         const settingsImportFile = document.getElementById('settings-import-file');
         const settingsClearHistoryBtn = document.getElementById('settings-clear-history-btn');
+        const settingsAboutVersion = document.getElementById('settings-about-version');
+        const settingsAboutPlatform = document.getElementById('settings-about-platform');
+        const settingsUpdateStatus = document.getElementById('settings-update-status');
+        const settingsUpdateProgress = document.getElementById('settings-update-progress');
+        const settingsUpdateProgressFill = document.getElementById('settings-update-progress-fill');
+        const settingsUpdateProgressText = document.getElementById('settings-update-progress-text');
+        const settingsUpdateCheckBtn = document.getElementById('settings-update-check-btn');
+        const settingsUpdateDownloadBtn = document.getElementById('settings-update-download-btn');
+        const settingsUpdateRestartBtn = document.getElementById('settings-update-restart-btn');
         const contextUsageEl = document.getElementById('context-usage');
         const contextUsageRingEl = document.getElementById('context-usage-ring');
         const contextUsagePercentEl = document.getElementById('context-usage-percent');
@@ -126,6 +135,8 @@
         let settingsModelConfig = null;
         let selectedSandbox = null;
         let activeSettingsTab = 'general';
+        let desktopUpdateStatus = null;
+        let desktopUpdatePollTimer = null;
         let sessionModelSelections = {};
         let settingsProviderModelComboboxController = null;
         let latestContextUsage = null;
@@ -2727,6 +2738,7 @@
             provider: ['提供商', '提供商配置'],
             workspace: ['工作区', '默认工作目录和项目入口'],
             privacy: ['隐私与日志', '日志目录和清理操作'],
+            about: ['关于', '版本信息和 Windows 自动更新'],
         };
 
         function createDefaultAppSettings() {
@@ -2846,6 +2858,181 @@
             await persistAppSettingsPatch({ privacy: { logRetentionDays: days } }, '已保存日志保留时间');
         }
 
+        function formatDesktopPlatform(platform) {
+            if (platform === 'win32') return 'Windows';
+            if (platform === 'darwin') return 'macOS';
+            if (platform === 'linux') return 'Linux';
+            return platform || '未知';
+        }
+
+        function formatUpdateBytes(bytes) {
+            var value = Number(bytes || 0);
+            if (!Number.isFinite(value) || value <= 0) return '0 B';
+            var units = ['B', 'KB', 'MB', 'GB'];
+            var unit = 0;
+            while (value >= 1024 && unit < units.length - 1) {
+                value = value / 1024;
+                unit += 1;
+            }
+            return (unit === 0 ? String(Math.round(value)) : value.toFixed(1)) + ' ' + units[unit];
+        }
+
+        function getUpdateStatusTone(state) {
+            if (state === 'available' || state === 'downloaded' || state === 'not-available') return 'ready';
+            if (state === 'unsupported' || state === 'unavailable') return 'warn';
+            if (state === 'error') return 'error';
+            return '';
+        }
+
+        function getUpdateStatusText(status) {
+            if (!status) return '加载中…';
+            if (status.message) return status.message;
+            if (status.state === 'checking') return '正在检测更新...';
+            if (status.state === 'available') return '发现新版本 ' + (status.latestVersion || '');
+            if (status.state === 'downloading') return '正在下载更新...';
+            if (status.state === 'downloaded') return '更新已下载，重启后安装。';
+            if (status.state === 'not-available') return '当前已是最新版本。';
+            if (status.state === 'unsupported') return '当前平台暂不支持应用内自动更新。';
+            if (status.state === 'unavailable') return '当前环境不能检查更新。';
+            if (status.state === 'error') return '更新失败。';
+            return '准备检测更新。';
+        }
+
+        function renderDesktopUpdateStatus(status) {
+            desktopUpdateStatus = status || desktopUpdateStatus;
+            status = desktopUpdateStatus;
+            var state = status && status.state;
+            var progress = status && status.progress;
+
+            if (settingsAboutVersion) {
+                settingsAboutVersion.textContent = status && status.currentVersion ? status.currentVersion : '未知';
+            }
+            if (settingsAboutPlatform) {
+                settingsAboutPlatform.textContent = status
+                    ? formatDesktopPlatform(status.platform) + (status.packaged ? ' 安装版' : ' 开发模式')
+                    : '未知';
+            }
+            if (settingsUpdateStatus) {
+                settingsUpdateStatus.classList.remove('ready', 'warn', 'error');
+                var tone = getUpdateStatusTone(state);
+                if (tone) settingsUpdateStatus.classList.add(tone);
+                settingsUpdateStatus.textContent = getUpdateStatusText(status);
+            }
+
+            if (settingsUpdateProgress) {
+                var showProgress = state === 'downloading' && progress;
+                settingsUpdateProgress.hidden = !showProgress;
+                if (showProgress) {
+                    var percent = Math.max(0, Math.min(100, Number(progress.percent || 0)));
+                    if (settingsUpdateProgressFill) settingsUpdateProgressFill.style.width = percent.toFixed(1) + '%';
+                    if (settingsUpdateProgressText) {
+                        settingsUpdateProgressText.textContent =
+                            percent.toFixed(1) + '% · ' +
+                            formatUpdateBytes(progress.transferred) + ' / ' +
+                            formatUpdateBytes(progress.total);
+                    }
+                }
+            }
+
+            if (settingsUpdateCheckBtn) {
+                var canCheck = status && status.supported && state !== 'checking' && state !== 'downloading' && state !== 'downloaded' && state !== 'restarting';
+                settingsUpdateCheckBtn.disabled = !canCheck;
+                settingsUpdateCheckBtn.textContent = state === 'checking' ? '检测中…' : '检测更新';
+            }
+            if (settingsUpdateDownloadBtn) {
+                var canDownload = status && status.supported && state === 'available';
+                settingsUpdateDownloadBtn.hidden = !(state === 'available' || state === 'downloading');
+                settingsUpdateDownloadBtn.disabled = !canDownload;
+                settingsUpdateDownloadBtn.textContent = state === 'downloading' ? '下载中…' : '下载更新';
+            }
+            if (settingsUpdateRestartBtn) {
+                settingsUpdateRestartBtn.hidden = state !== 'downloaded' && state !== 'restarting';
+                settingsUpdateRestartBtn.disabled = state === 'restarting';
+                settingsUpdateRestartBtn.textContent = state === 'restarting' ? '重启中…' : '重启更新';
+            }
+
+            updateDesktopUpdatePolling();
+        }
+
+        async function requestDesktopUpdate(endpoint, method) {
+            var res = await fetch('/api/desktop-update/' + endpoint, { method: method || 'GET' });
+            var data = await res.json().catch(function () { return {}; });
+            if (!res.ok) {
+                throw new Error(data.error || data.message || '更新请求失败');
+            }
+            return data;
+        }
+
+        async function fetchDesktopUpdateStatus() {
+            try {
+                renderDesktopUpdateStatus(await requestDesktopUpdate('status', 'GET'));
+            } catch (e) {
+                renderDesktopUpdateStatus({
+                    platform: '',
+                    supported: false,
+                    packaged: false,
+                    currentVersion: desktopUpdateStatus && desktopUpdateStatus.currentVersion,
+                    state: 'error',
+                    message: e && e.message ? e.message : '读取更新状态失败。',
+                    latestVersion: null,
+                    updateInfo: null,
+                    progress: null,
+                    error: e && e.message ? e.message : String(e),
+                });
+            }
+        }
+
+        async function checkDesktopUpdate() {
+            if (!settingsUpdateCheckBtn) return;
+            settingsUpdateCheckBtn.disabled = true;
+            settingsUpdateCheckBtn.textContent = '检测中…';
+            try {
+                renderDesktopUpdateStatus(await requestDesktopUpdate('check', 'POST'));
+            } catch (e) {
+                showError(e && e.message ? e.message : '检测更新失败');
+                await fetchDesktopUpdateStatus();
+            }
+        }
+
+        async function downloadDesktopUpdate() {
+            if (!settingsUpdateDownloadBtn) return;
+            settingsUpdateDownloadBtn.disabled = true;
+            settingsUpdateDownloadBtn.textContent = '下载中…';
+            try {
+                renderDesktopUpdateStatus(await requestDesktopUpdate('download', 'POST'));
+            } catch (e) {
+                showError(e && e.message ? e.message : '下载更新失败');
+                await fetchDesktopUpdateStatus();
+            }
+        }
+
+        async function restartDesktopUpdate() {
+            if (!settingsUpdateRestartBtn) return;
+            settingsUpdateRestartBtn.disabled = true;
+            settingsUpdateRestartBtn.textContent = '重启中…';
+            try {
+                renderDesktopUpdateStatus(await requestDesktopUpdate('restart', 'POST'));
+            } catch (e) {
+                showError(e && e.message ? e.message : '重启更新失败');
+                await fetchDesktopUpdateStatus();
+            }
+        }
+
+        function updateDesktopUpdatePolling() {
+            var state = desktopUpdateStatus && desktopUpdateStatus.state;
+            var shouldPoll = activeSettingsTab === 'about' && (state === 'checking' || state === 'downloading');
+            if (!shouldPoll) {
+                if (desktopUpdatePollTimer) {
+                    clearInterval(desktopUpdatePollTimer);
+                    desktopUpdatePollTimer = null;
+                }
+                return;
+            }
+            if (!desktopUpdatePollTimer) {
+                desktopUpdatePollTimer = setInterval(fetchDesktopUpdateStatus, 1200);
+            }
+        }
+
         function setSettingsTab(tab) {
             if (!SETTINGS_TAB_META[tab]) tab = 'general';
             activeSettingsTab = tab;
@@ -2859,6 +3046,11 @@
             });
             if (settingsTitle) settingsTitle.textContent = SETTINGS_TAB_META[tab][0];
             if (settingsSubtitle) settingsSubtitle.textContent = SETTINGS_TAB_META[tab][1];
+            if (tab === 'about') {
+                fetchDesktopUpdateStatus();
+            } else {
+                updateDesktopUpdatePolling();
+            }
         }
 
         settingsNavItems.forEach(function (item) {
@@ -4029,6 +4221,15 @@
                     settingsLogRetentionDays.blur();
                 }
             });
+        }
+        if (settingsUpdateCheckBtn) {
+            settingsUpdateCheckBtn.addEventListener('click', checkDesktopUpdate);
+        }
+        if (settingsUpdateDownloadBtn) {
+            settingsUpdateDownloadBtn.addEventListener('click', downloadDesktopUpdate);
+        }
+        if (settingsUpdateRestartBtn) {
+            settingsUpdateRestartBtn.addEventListener('click', restartDesktopUpdate);
         }
         if (settingsProjectsEntryBtn) {
             settingsProjectsEntryBtn.addEventListener('click', function () {
