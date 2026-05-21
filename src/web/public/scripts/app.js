@@ -105,8 +105,6 @@
         const settingsImportFile = document.getElementById('settings-import-file');
         const settingsClearHistoryBtn = document.getElementById('settings-clear-history-btn');
         const settingsAboutVersion = document.getElementById('settings-about-version');
-        const settingsAboutPlatformRow = document.getElementById('settings-about-platform-row');
-        const settingsAboutPlatform = document.getElementById('settings-about-platform');
         const settingsUpdateSection = document.getElementById('settings-update-section');
         const settingsUpdateStatus = document.getElementById('settings-update-status');
         const settingsUpdateProgress = document.getElementById('settings-update-progress');
@@ -162,7 +160,6 @@
         let skillPickerOpen = false;
         const isDesktopAppClient = /\bElectron\//i.test(navigator.userAgent || '');
 
-        if (settingsAboutPlatformRow) settingsAboutPlatformRow.hidden = !isDesktopAppClient;
         if (settingsUpdateSection) settingsUpdateSection.hidden = !isDesktopAppClient;
         let skillPickerQuery = '';
         let skillPickerTokenStart = null;
@@ -2864,13 +2861,6 @@
             await persistAppSettingsPatch({ privacy: { logRetentionDays: days } }, '已保存日志保留时间');
         }
 
-        function formatDesktopPlatform(platform) {
-            if (platform === 'win32') return 'Windows';
-            if (platform === 'darwin') return 'macOS';
-            if (platform === 'linux') return 'Linux';
-            return platform || '未知';
-        }
-
         function formatUpdateBytes(bytes) {
             var value = Number(bytes || 0);
             if (!Number.isFinite(value) || value <= 0) return '0 B';
@@ -2910,19 +2900,11 @@
             var state = status && status.state;
             var progress = status && status.progress;
 
-            if (settingsAboutPlatformRow) {
-                settingsAboutPlatformRow.hidden = !isDesktopAppClient;
-            }
             if (settingsUpdateSection) {
                 settingsUpdateSection.hidden = !isDesktopAppClient;
             }
             if (settingsAboutVersion) {
                 settingsAboutVersion.textContent = status && status.currentVersion ? status.currentVersion : '未知';
-            }
-            if (settingsAboutPlatform) {
-                settingsAboutPlatform.textContent = status
-                    ? formatDesktopPlatform(status.platform) + (status.packaged ? ' 安装版' : ' 开发模式')
-                    : '未知';
             }
             if (settingsUpdateStatus) {
                 settingsUpdateStatus.classList.remove('ready', 'warn', 'error');
