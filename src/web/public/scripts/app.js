@@ -3304,9 +3304,6 @@
                 });
                 var openInput = document.querySelector('.provider-model-input-control.open [data-provider-model-suggestion-input="true"]');
                 if (openInput) showProviderModelSuggestionMenu(openInput);
-                if (remoteProviderModelSuggestions.length > 0) {
-                    showSettingsStatus(data.cached ? '已使用缓存模型列表' : '已获取模型列表');
-                }
             } catch (e) {
                 if (seq !== remoteProviderModelFetchSeq) return;
                 remoteProviderModelSuggestions = [];
