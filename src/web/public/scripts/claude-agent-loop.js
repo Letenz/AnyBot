@@ -222,7 +222,7 @@
 
         function openProcessIfAvailable() {
             updateProcessAvailability();
-            if (hasProcessDetails()) process.open = true;
+            if (state.status === 'running' && hasProcessDetails()) process.open = true;
         }
 
         function updateActivitySummary() {
@@ -494,7 +494,7 @@
         }
 
         function shouldKeepProcessOpenAfterCompletion() {
-            return state.tasks.size > 0;
+            return false;
         }
 
         function appendTaskStep(taskState, text) {
