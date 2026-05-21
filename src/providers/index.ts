@@ -20,30 +20,79 @@ function dropUndefined(config: Record<string, unknown>): Record<string, unknown>
   );
 }
 
+function cleanString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function preferSettingWhenEnabled(
+  useSettingsFirst: boolean,
+  settingValue: string | undefined,
+  envValue: string | undefined,
+): string | undefined {
+  const setting = cleanString(settingValue);
+  const env = cleanString(envValue);
+  return useSettingsFirst ? setting || env : env || setting;
+}
+
 function getClaudeCodeBin(): string | undefined {
-  const bin = process.env.CLAUDE_CODE_BIN?.trim();
+  const bin = cleanString(process.env.CLAUDE_CODE_BIN);
   if (!bin || bin === "claude") return undefined;
   return bin;
+}
+
+function getClaudeCodeExecutable(
+  settings: ReturnType<typeof getProviderRuntimeSettings>,
+  useAnthropicCompat: boolean,
+): string | undefined {
+  const configured = cleanString(settings.pathToClaudeCodeExecutable) || cleanString(settings.bin);
+  if (useAnthropicCompat) {
+    return configured;
+  }
+  return getClaudeCodeBin() || configured;
 }
 
 export function getProviderConfig(type: string): Record<string, unknown> {
   const settings = getProviderRuntimeSettings(normalizeProviderType(type));
   const useAnthropicCompat = settings.anthropicCompatEnabled === true;
+  const anthropicAutoModel = preferSettingWhenEnabled(
+    useAnthropicCompat,
+    settings.anthropicAutoModel,
+    process.env.ANTHROPIC_MODEL,
+  );
   switch (normalizeProviderType(type)) {
     case "codex":
       return dropUndefined({ bin: process.env.CODEX_BIN || settings.bin });
     case "claude-code":
       return dropUndefined({
-        pathToClaudeCodeExecutable: getClaudeCodeBin() || settings.pathToClaudeCodeExecutable || settings.bin,
-        defaultModel: process.env.CLAUDE_AGENT_MODEL || (useAnthropicCompat ? settings.defaultModel || settings.anthropicAutoModel : undefined),
-        apiKey: process.env.ANTHROPIC_API_KEY || (useAnthropicCompat ? settings.apiKey : undefined),
-        apiKeyHelper: process.env.CLAUDE_CODE_API_KEY_HELPER || (useAnthropicCompat ? settings.apiKeyHelper : undefined),
-        anthropicBaseUrl: process.env.ANTHROPIC_BASE_URL || (useAnthropicCompat ? settings.anthropicBaseUrl : undefined),
-        anthropicAutoModel: process.env.ANTHROPIC_MODEL || (useAnthropicCompat ? settings.anthropicAutoModel : undefined),
-        anthropicOpusModel: process.env.ANTHROPIC_DEFAULT_OPUS_MODEL || (useAnthropicCompat ? settings.anthropicOpusModel : undefined),
-        anthropicSonnetModel: process.env.ANTHROPIC_DEFAULT_SONNET_MODEL || (useAnthropicCompat ? settings.anthropicSonnetModel : undefined),
-        anthropicHaikuModel: process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL || (useAnthropicCompat ? settings.anthropicHaikuModel : undefined),
-        claudeCodeSubagentModel: process.env.CLAUDE_CODE_SUBAGENT_MODEL || (useAnthropicCompat ? settings.claudeCodeSubagentModel : undefined),
+        pathToClaudeCodeExecutable: getClaudeCodeExecutable(settings, useAnthropicCompat),
+        defaultModel: useAnthropicCompat
+          ? cleanString(settings.defaultModel) || anthropicAutoModel || cleanString(process.env.CLAUDE_AGENT_MODEL)
+          : cleanString(process.env.CLAUDE_AGENT_MODEL),
+        apiKey: preferSettingWhenEnabled(useAnthropicCompat, settings.apiKey, process.env.ANTHROPIC_API_KEY),
+        apiKeyHelper: preferSettingWhenEnabled(useAnthropicCompat, settings.apiKeyHelper, process.env.CLAUDE_CODE_API_KEY_HELPER),
+        anthropicBaseUrl: preferSettingWhenEnabled(useAnthropicCompat, settings.anthropicBaseUrl, process.env.ANTHROPIC_BASE_URL),
+        anthropicAutoModel,
+        anthropicOpusModel: preferSettingWhenEnabled(
+          useAnthropicCompat,
+          settings.anthropicOpusModel,
+          process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+        ),
+        anthropicSonnetModel: preferSettingWhenEnabled(
+          useAnthropicCompat,
+          settings.anthropicSonnetModel,
+          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+        ),
+        anthropicHaikuModel: preferSettingWhenEnabled(
+          useAnthropicCompat,
+          settings.anthropicHaikuModel,
+          process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+        ),
+        claudeCodeSubagentModel: preferSettingWhenEnabled(
+          useAnthropicCompat,
+          settings.claudeCodeSubagentModel,
+          process.env.CLAUDE_CODE_SUBAGENT_MODEL,
+        ),
         maxTurns: process.env.CLAUDE_AGENT_MAX_TURNS
           ? parseInt(process.env.CLAUDE_AGENT_MAX_TURNS, 10)
           : settings.maxTurns,

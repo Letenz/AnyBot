@@ -1,3 +1,5 @@
+import { mkdirSync } from "node:fs";
+import path from "node:path";
 import {
   query,
   type Options,
@@ -30,6 +32,7 @@ import {
   extractAssistantTextDelta,
   type ClaudeAgentStreamEvent,
 } from "./claude-code-agent-events.js";
+import { getDataDir } from "../app-settings.js";
 import { logger } from "../logger.js";
 import type { SandboxMode } from "../types.js";
 
@@ -289,6 +292,8 @@ export class ClaudeCodeProvider implements IProvider {
     const startedAt = Date.now();
     const abortController = new AbortController();
     const permissionMode = this.permissionMode ?? mapSandboxToPermissionMode(sandbox);
+    const useAnthropicCompat = this.hasAnthropicCompatConfig();
+    const claudeConfigDir = useAnthropicCompat ? this.getIsolatedClaudeConfigDir() : undefined;
     const resultModel = this.resolveModelAlias(model && model !== "auto" ? model : undefined)
       || this.anthropicAutoModel
       || this.defaultModel;
@@ -307,10 +312,19 @@ export class ClaudeCodeProvider implements IProvider {
 
     logger.info("provider.exec.start", {
       provider: this.type,
-      bin: this.pathToClaudeCodeExecutable,
+      bin: this.pathToClaudeCodeExecutable || null,
+      claudeConfigDir: claudeConfigDir || null,
       workdir,
       sandbox,
       model: resultModel || null,
+      anthropicBaseUrl: this.anthropicBaseUrl || null,
+      anthropicAutoModel: this.anthropicAutoModel || this.defaultModel || null,
+      anthropicOpusModel: this.anthropicOpusModel || null,
+      anthropicSonnetModel: this.anthropicSonnetModel || null,
+      anthropicHaikuModel: this.anthropicHaikuModel || null,
+      claudeCodeSubagentModel: this.claudeCodeSubagentModel || null,
+      apiKeyConfigured: Boolean(this.apiKey),
+      apiKeyHelperConfigured: Boolean(this.apiKeyHelper),
       sessionId: sessionId || null,
       newSessionId: sessionId ? null : newSessionId || null,
       promptChars: prompt.length,
@@ -329,6 +343,15 @@ export class ClaudeCodeProvider implements IProvider {
         CLAUDE_AGENT_SDK_CLIENT_APP: process.env.CLAUDE_AGENT_SDK_CLIENT_APP || "anybot/0.1.0",
       };
       this.applyAnthropicEnv(env);
+      if (useAnthropicCompat) {
+        env.CLAUDE_CONFIG_DIR = claudeConfigDir;
+        delete env.CLAUDE_CODE_BIN;
+        if (!this.apiKeyHelper) delete env.CLAUDE_CODE_API_KEY_HELPER;
+        if (this.apiKey) {
+          delete env.ANTHROPIC_AUTH_TOKEN;
+          delete env.CLAUDE_CODE_OAUTH_TOKEN;
+        }
+      }
 
       if (!env.ANTHROPIC_API_KEY) {
         delete env.ANTHROPIC_API_KEY;
@@ -515,6 +538,7 @@ export class ClaudeCodeProvider implements IProvider {
         durationMs: Date.now() - startedAt,
         replyChars: responseText.length,
         sessionId: resultMessage.session_id,
+        modelUsage: Object.keys(resultMessage.modelUsage || {}),
         totalCostUsd: resultMessage.total_cost_usd,
       });
 
@@ -586,6 +610,26 @@ export class ClaudeCodeProvider implements IProvider {
     if (model === "claude-opus-4-7") return this.anthropicOpusModel || model;
     if (model === "claude-sonnet-4-6") return this.anthropicSonnetModel || model;
     return model;
+  }
+
+  private hasAnthropicCompatConfig(): boolean {
+    return Boolean(
+      this.apiKey ||
+      this.apiKeyHelper ||
+      this.anthropicBaseUrl ||
+      this.anthropicAutoModel ||
+      this.defaultModel ||
+      this.anthropicOpusModel ||
+      this.anthropicSonnetModel ||
+      this.anthropicHaikuModel ||
+      this.claudeCodeSubagentModel
+    );
+  }
+
+  private getIsolatedClaudeConfigDir(): string {
+    const dir = path.join(getDataDir(), "claude-code");
+    mkdirSync(dir, { recursive: true });
+    return dir;
   }
 
   private applyAnthropicEnv(env: NodeJS.ProcessEnv): void {

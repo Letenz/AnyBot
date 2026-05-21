@@ -3124,23 +3124,20 @@
             },
         };
 
-        var PROVIDER_MODEL_SUGGESTION_STRATEGIES = [
-            {
-                id: 'deepseek',
-                label: 'DeepSeek',
-                matchUrl: function (url) {
-                    return String(url || '').toLowerCase().indexOf('api.deepseek.com') !== -1;
-                },
-                models: [
-                    'deepseek-v4-flash',
-                    'deepseek-v4-pro[1m]',
-                    'deepseek-v4-pro',
-                ],
-            },
-        ];
+        var PROVIDER_MODEL_SUGGESTION_STRATEGIES = [];
+        var remoteProviderModelSuggestions = [];
+        var remoteProviderModelFetchTimer = null;
+        var remoteProviderModelFetchSeq = 0;
 
         function getProviderSettingsDefinition(providerType) {
             return PROVIDER_SETTINGS_DEFINITIONS[providerType] || null;
+        }
+
+        function getRemoteProviderModelSource(baseUrl) {
+            var lower = String(baseUrl || '').toLowerCase();
+            if (lower.indexOf('vibeapi') !== -1) return 'VibeAPI';
+            if (lower.indexOf('api.deepseek.com') !== -1) return 'DeepSeek';
+            return '';
         }
 
         function getProviderModelSuggestionStrategy(baseUrl) {
@@ -3151,14 +3148,22 @@
 
         function getProviderModelSuggestions(baseUrl) {
             var strategy = getProviderModelSuggestionStrategy(baseUrl);
-            if (!strategy) return [];
-            return strategy.models.map(function (model) {
+            var suggestions = strategy ? strategy.models.map(function (model) {
                 return {
                     id: model,
                     label: model,
                     source: strategy.label,
                 };
-            });
+            }) : [];
+            if (getRemoteProviderModelSource(baseUrl)) {
+                remoteProviderModelSuggestions.forEach(function (suggestion) {
+                    var exists = suggestions.some(function (item) {
+                        return item.id === suggestion.id;
+                    });
+                    if (!exists) suggestions.push(suggestion);
+                });
+            }
+            return suggestions;
         }
 
         function buildProviderModelInput(id, value) {
@@ -3181,6 +3186,70 @@
         function getProviderModelSuggestionBaseUrl() {
             var input = document.getElementById('settings-provider-anthropic-base-url');
             return input ? input.value.trim() : '';
+        }
+
+        function getProviderModelSuggestionApiKey() {
+            var input = document.getElementById('settings-provider-api-key');
+            return input ? input.value.trim() : '';
+        }
+
+        function clearRemoteProviderModelSuggestions() {
+            remoteProviderModelSuggestions = [];
+            remoteProviderModelFetchSeq += 1;
+            var openInput = document.querySelector('.provider-model-input-control.open [data-provider-model-suggestion-input="true"]');
+            if (openInput) showProviderModelSuggestionMenu(openInput);
+        }
+
+        function scheduleRemoteProviderModelFetch() {
+            if (remoteProviderModelFetchTimer) clearTimeout(remoteProviderModelFetchTimer);
+            remoteProviderModelFetchTimer = setTimeout(fetchRemoteProviderModels, 600);
+        }
+
+        async function fetchRemoteProviderModels() {
+            remoteProviderModelFetchTimer = null;
+            var baseUrl = getProviderModelSuggestionBaseUrl();
+            var apiKey = getProviderModelSuggestionApiKey();
+            var source = getRemoteProviderModelSource(baseUrl);
+            if (!source || !apiKey) {
+                clearRemoteProviderModelSuggestions();
+                return;
+            }
+            var seq = remoteProviderModelFetchSeq + 1;
+            remoteProviderModelFetchSeq = seq;
+            try {
+                var res = await fetch('/api/provider-models', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({baseUrl: baseUrl, apiKey: apiKey}),
+                });
+                var data = await res.json().catch(function () { return {}; });
+                if (seq !== remoteProviderModelFetchSeq) return;
+                if (!res.ok) {
+                    remoteProviderModelSuggestions = [];
+                    showSettingsStatus(data.error || '获取模型列表失败', 'error');
+                    return;
+                }
+                var models = Array.isArray(data.models) ? data.models : [];
+                remoteProviderModelSuggestions = models.filter(function (model) {
+                    return typeof model === 'string' && model.trim();
+                }).map(function (model) {
+                    var id = model.trim();
+                    return {
+                        id: id,
+                        label: id,
+                        source: data.provider || source,
+                    };
+                });
+                var openInput = document.querySelector('.provider-model-input-control.open [data-provider-model-suggestion-input="true"]');
+                if (openInput) showProviderModelSuggestionMenu(openInput);
+                if (remoteProviderModelSuggestions.length > 0) {
+                    showSettingsStatus(data.cached ? '已使用缓存模型列表' : '已获取模型列表');
+                }
+            } catch (e) {
+                if (seq !== remoteProviderModelFetchSeq) return;
+                remoteProviderModelSuggestions = [];
+                showSettingsStatus('获取模型列表失败', 'error');
+            }
         }
 
         function showProviderModelSuggestionMenu(input) {
@@ -3262,12 +3331,26 @@
 
         function bindProviderModelSuggestionInputs() {
             var baseUrlInput = document.getElementById('settings-provider-anthropic-base-url');
+            var apiKeyInput = document.getElementById('settings-provider-api-key');
             var modelInputs = Array.prototype.slice.call(document.querySelectorAll('[data-provider-model-suggestion-input="true"]'));
             if (baseUrlInput) {
                 baseUrlInput.addEventListener('input', function () {
+                    if (!getRemoteProviderModelSource(baseUrlInput.value)) {
+                        clearRemoteProviderModelSuggestions();
+                    } else {
+                        clearRemoteProviderModelSuggestions();
+                        scheduleRemoteProviderModelFetch();
+                    }
                     var openInput = document.querySelector('.provider-model-input-control.open [data-provider-model-suggestion-input="true"]');
                     if (openInput) showProviderModelSuggestionMenu(openInput);
                 });
+            }
+            if (apiKeyInput) {
+                apiKeyInput.addEventListener('input', function () {
+                    clearRemoteProviderModelSuggestions();
+                    scheduleRemoteProviderModelFetch();
+                });
+                apiKeyInput.addEventListener('change', scheduleRemoteProviderModelFetch);
             }
             modelInputs.forEach(function (input) {
                 input.setAttribute('aria-haspopup', 'listbox');
@@ -3281,6 +3364,7 @@
                 });
                 input.addEventListener('keydown', handleProviderModelSuggestionInputKeydown);
             });
+            scheduleRemoteProviderModelFetch();
         }
 
         function renderSettingsProviderDetails() {

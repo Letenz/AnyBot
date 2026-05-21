@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import type { Request, Response } from "express";
@@ -65,7 +66,56 @@ const execFile = promisify(execFileCallback);
 const DEFAULT_SESSION_MESSAGE_LIMIT = 40;
 const MESSAGE_PREVIEW_CHARS = 20000;
 const WORKSPACE_MEMORY_FILES = ["AGENTS.md", "MEMORY.md", "PROFILE.md", "BOOTSTRAP.md"] as const;
+const PROVIDER_MODEL_FETCH_TIMEOUT_MS = 10000;
+const PROVIDER_MODEL_CACHE_TTL_MS = 30 * 60 * 1000;
 const activeRunControllers = new Map<string, AbortController>();
+const providerModelCache = new Map<string, { expiresAt: number; models: string[]; provider: string }>();
+
+function buildProviderModelsRequest(baseUrl: string): { modelsUrl: string; provider: string } {
+  const parsed = new URL(baseUrl);
+  const lower = baseUrl.toLowerCase();
+  if (lower.includes("vibeapi")) {
+    return { modelsUrl: new URL("/v1/models", parsed.origin).toString(), provider: "VibeAPI" };
+  }
+  if (lower.includes("api.deepseek.com")) {
+    return { modelsUrl: new URL("/models", parsed.origin).toString(), provider: "DeepSeek" };
+  }
+  throw new Error("仅支持 VibeAPI 或 DeepSeek Base URL 自动获取模型");
+}
+
+function getProviderModelCacheKey(modelsUrl: string, apiKey: string): string {
+  return createHash("sha256").update(modelsUrl).update("\0").update(apiKey).digest("hex");
+}
+
+function getObjectStringValue(value: unknown, key: string): string | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = (value as Record<string, unknown>)[key];
+  if (raw && typeof raw === "object") return getObjectStringValue(raw, "message");
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+}
+
+function extractProviderModelIds(payload: unknown): string[] {
+  const data = getObjectArrayValue(payload, "data");
+  const models = getObjectArrayValue(payload, "models");
+  const source = Array.isArray(payload) ? payload : data || models || [];
+  const ids = source
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      return (
+        getObjectStringValue(item, "id") ||
+        getObjectStringValue(item, "name") ||
+        getObjectStringValue(item, "model")
+      );
+    })
+    .filter((id): id is string => Boolean(id));
+  return Array.from(new Set(ids));
+}
+
+function getObjectArrayValue(value: unknown, key: string): unknown[] | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = (value as Record<string, unknown>)[key];
+  return Array.isArray(raw) ? raw : null;
+}
 
 function getDesktopUpdateUnavailableStatus(): Record<string, unknown> {
   return {
@@ -713,6 +763,91 @@ export function chatRouter(): Router {
   });
 
   // --- Model & Provider config ---
+
+  router.post("/provider-models", async (req: Request, res: Response) => {
+    const body = req.body as { baseUrl?: unknown; apiKey?: unknown } | undefined;
+    const baseUrl = typeof body?.baseUrl === "string" ? body.baseUrl.trim() : "";
+    const apiKey = typeof body?.apiKey === "string" ? body.apiKey.trim() : "";
+    if (!baseUrl || !apiKey) {
+      res.status(400).json({ error: "缺少 Base URL 或 API Key" });
+      return;
+    }
+
+    let modelsUrl: string;
+    let provider: string;
+    try {
+      const request = buildProviderModelsRequest(baseUrl);
+      modelsUrl = request.modelsUrl;
+      provider = request.provider;
+    } catch (error) {
+      const msg = error instanceof Error && (error.message.includes("VibeAPI") || error.message.includes("DeepSeek"))
+        ? error.message
+        : "Base URL 无效";
+      res.status(400).json({ error: msg });
+      return;
+    }
+
+    const now = Date.now();
+    const cacheKey = getProviderModelCacheKey(modelsUrl, apiKey);
+    const cached = providerModelCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      res.json({
+        models: cached.models,
+        provider: cached.provider,
+        cached: true,
+        expiresAt: new Date(cached.expiresAt).toISOString(),
+      });
+      return;
+    }
+    if (cached) providerModelCache.delete(cacheKey);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), PROVIDER_MODEL_FETCH_TIMEOUT_MS);
+    try {
+      const response = await undiciFetch(modelsUrl, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let payload: unknown = {};
+      try {
+        payload = text ? JSON.parse(text) : {};
+      } catch {
+        payload = {};
+      }
+      if (!response.ok) {
+        const upstreamError = getObjectStringValue(payload, "error") || text || "获取模型列表失败";
+        res.status(response.status).json({ error: upstreamError });
+        return;
+      }
+
+      const models = extractProviderModelIds(payload);
+      if (models.length === 0) {
+        res.status(502).json({ error: "模型列表为空或格式不支持" });
+        return;
+      }
+
+      const expiresAt = Date.now() + PROVIDER_MODEL_CACHE_TTL_MS;
+      providerModelCache.set(cacheKey, { models, provider, expiresAt });
+      res.json({ models, provider, cached: false, expiresAt: new Date(expiresAt).toISOString() });
+    } catch (error) {
+      const msg = error instanceof Error && error.name === "AbortError"
+        ? "获取模型列表超时"
+        : error instanceof Error
+          ? error.message
+          : "获取模型列表失败";
+      logger.warn("provider_models.fetch_failed", {
+        provider,
+        modelsUrl,
+        error: msg,
+      });
+      res.status(502).json({ error: msg });
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
 
   router.get("/model-config", (req: Request, res: Response) => {
     try {
