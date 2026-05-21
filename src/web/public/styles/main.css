@@ -98,12 +98,32 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
+            overflow-x: hidden;
+            overflow-y: auto;
+            scrollbar-gutter: stable;
+            scrollbar-width: thin;
+            scrollbar-color: var(--scrollbar) var(--sidebar);
             transition: width 0.25s ease;
+        }
+
+        #sidebar::-webkit-scrollbar {
+            width: 10px;
+        }
+
+        #sidebar::-webkit-scrollbar-track {
+            background: var(--sidebar);
+        }
+
+        #sidebar::-webkit-scrollbar-thumb {
+            background: var(--scrollbar);
+            border: 3px solid var(--sidebar);
+            border-radius: 99px;
         }
 
         .sidebar-top {
             padding: 20px 16px 12px;
             border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
         }
 
         .logo {
@@ -385,8 +405,7 @@
 
         .project-list {
             padding: 2px 8px 8px;
-            max-height: 42vh;
-            overflow-y: auto;
+            flex-shrink: 0;
         }
 
         #sidebar.projects-collapsed .project-list {
@@ -394,45 +413,18 @@
         }
 
         .history-list {
-            flex: 1;
-            overflow-y: auto;
+            flex: 0 0 auto;
             padding: 4px 8px 12px;
         }
 
         #sidebar.history-collapsed .history-list {
-            overflow: hidden;
+            display: none;
             padding-top: 0;
             padding-bottom: 0;
         }
 
         #sidebar.history-collapsed .history-list > * {
             display: none;
-        }
-
-        .history-list::-webkit-scrollbar {
-            width: 3px;
-        }
-
-        .history-list::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .history-list::-webkit-scrollbar-thumb {
-            background: var(--scrollbar);
-            border-radius: 99px;
-        }
-
-        .project-list::-webkit-scrollbar {
-            width: 3px;
-        }
-
-        .project-list::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .project-list::-webkit-scrollbar-thumb {
-            background: var(--scrollbar);
-            border-radius: 99px;
         }
 
         .project-item,
