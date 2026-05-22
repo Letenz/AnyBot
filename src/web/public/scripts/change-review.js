@@ -10,6 +10,16 @@
         return sign + String(Math.max(0, value || 0));
     }
 
+    function isBinaryDiffText(diff) {
+        return /(?:^|\n)(?:Binary files .* differ|GIT binary patch)(?:\n|$)/.test(String(diff || ''));
+    }
+
+    function isTextDiffFile(file) {
+        if (!file) return true;
+        if (file.diffType) return file.diffType !== 'binary';
+        return !isBinaryDiffText(file.diff);
+    }
+
     function statusText(status) {
         if (status === 'approved') return '已通过';
         if (status === 'reverted') return '已撤销';
@@ -81,6 +91,32 @@
         return rendered.join('\n') || renderDiffLine('meta', '', '没有可展示的文本变化');
     }
 
+    function renderReviewCounts(review, files) {
+        if ((review.totalAdditions || 0) === 0 && (review.totalDeletions || 0) === 0) {
+            var hasResourceChange = files.some(function (file) { return !isTextDiffFile(file); });
+            if (hasResourceChange) return '<span class="change-review-count-label">资源变更</span>';
+        }
+        return '' +
+            '<span class="add">' + signedCount(review.totalAdditions, '+') + '</span>' +
+            '<span class="del">' + signedCount(review.totalDeletions, '-') + '</span>';
+    }
+
+    function renderFileCounts(file) {
+        if (!isTextDiffFile(file)) {
+            return '<span class="change-review-count-label">资源</span>';
+        }
+        return '' +
+            '<span class="add">' + signedCount(file.additions, '+') + '</span>' +
+            '<span class="del">' + signedCount(file.deletions, '-') + '</span>';
+    }
+
+    function renderFileBody(file) {
+        if (!isTextDiffFile(file)) {
+            return '<div class="change-review-file-note">媒体或二进制资源已变更，不展示代码 diff。</div>';
+        }
+        return '<pre class="change-review-diff">' + renderDiff(file.diff) + '</pre>';
+    }
+
     function renderFile(file) {
         return '' +
             '<details class="change-review-file">' +
@@ -90,12 +126,11 @@
             '<span class="change-review-file-status">' + statusLabel(file.status) + '</span>' +
             '</span>' +
             '<span class="change-review-file-counts">' +
-            '<span class="add">' + signedCount(file.additions, '+') + '</span>' +
-            '<span class="del">' + signedCount(file.deletions, '-') + '</span>' +
+            renderFileCounts(file) +
             '</span>' +
             '<span class="change-review-chevron">›</span>' +
             '</summary>' +
-            '<pre class="change-review-diff">' + renderDiff(file.diff) + '</pre>' +
+            renderFileBody(file) +
             '</details>';
     }
 
@@ -109,8 +144,7 @@
             '<div class="change-review-state">' + statusText(review.status) + '</div>' +
             '</div>' +
             '<div class="change-review-total">' +
-            '<span class="add">' + signedCount(review.totalAdditions, '+') + '</span>' +
-            '<span class="del">' + signedCount(review.totalDeletions, '-') + '</span>' +
+            renderReviewCounts(review, files) +
             '</div>' +
             '</div>' +
             '<div class="change-review-files">' + files.map(renderFile).join('') + '</div>' +

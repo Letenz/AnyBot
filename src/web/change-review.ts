@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 const execFileAsync = promisify(execFile);
 
 export type ChangeReviewStatus = "pending" | "approved" | "reverted";
+export type FileDiffType = "text" | "binary";
 
 export type PublicFileChange = {
   path: string;
@@ -15,6 +16,7 @@ export type PublicFileChange = {
   additions: number;
   deletions: number;
   diff: string;
+  diffType: FileDiffType;
 };
 
 export type PublicChangeReview = {
@@ -57,6 +59,62 @@ const dataDir =
 const reviewDir = path.join(dataDir, "change-reviews");
 const SNAPSHOT_SKIP_DIRS = new Set([".git", "node_modules", ".data", ".run", "tmp"]);
 const MAX_SNAPSHOT_FILE_BYTES = 10 * 1024 * 1024;
+const BINARY_DIFF_EXTENSIONS = new Set([
+  ".7z",
+  ".a",
+  ".ai",
+  ".apk",
+  ".avi",
+  ".avif",
+  ".bin",
+  ".bmp",
+  ".class",
+  ".db",
+  ".dll",
+  ".dmg",
+  ".doc",
+  ".docx",
+  ".dylib",
+  ".eot",
+  ".exe",
+  ".gif",
+  ".gz",
+  ".heic",
+  ".icns",
+  ".ico",
+  ".jar",
+  ".jpeg",
+  ".jpg",
+  ".m4a",
+  ".mkv",
+  ".mov",
+  ".mp3",
+  ".mp4",
+  ".ogg",
+  ".otf",
+  ".pdf",
+  ".png",
+  ".ppt",
+  ".pptx",
+  ".psd",
+  ".rar",
+  ".so",
+  ".sqlite",
+  ".tar",
+  ".tgz",
+  ".tif",
+  ".tiff",
+  ".ttf",
+  ".wav",
+  ".wasm",
+  ".webm",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".xls",
+  ".xlsx",
+  ".zip",
+]);
 
 async function ensureReviewDir(): Promise<void> {
   await fs.promises.mkdir(reviewDir, { recursive: true });
@@ -194,8 +252,31 @@ function bufferEqualsBase64(buffer: Buffer | null, encoded: string | null): bool
   return buffer.equals(Buffer.from(encoded, "base64"));
 }
 
-function isBinary(buffer: Buffer): boolean {
-  return buffer.includes(0);
+function hasBinaryDiffExtension(relativePath: string): boolean {
+  return BINARY_DIFF_EXTENSIONS.has(path.extname(relativePath).toLowerCase());
+}
+
+function isLikelyBinary(buffer: Buffer): boolean {
+  if (buffer.length === 0) return false;
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8000));
+  if (sample.includes(0)) return true;
+
+  let controlBytes = 0;
+  for (const byte of sample) {
+    if (byte === 9 || byte === 10 || byte === 13) continue;
+    if (byte < 32 || byte === 127) controlBytes += 1;
+  }
+  return controlBytes / sample.length > 0.03;
+}
+
+function detectDiffType(relativePath: string, before: Buffer, after: Buffer): FileDiffType {
+  if (hasBinaryDiffExtension(relativePath)) return "binary";
+  if (isLikelyBinary(before) || isLikelyBinary(after)) return "binary";
+  return "text";
+}
+
+function inferDiffTypeFromDiff(diff: string): FileDiffType {
+  return /(?:^|\n)(?:Binary files .* differ|GIT binary patch)(?:\n|$)/.test(diff) ? "binary" : "text";
 }
 
 async function writeTempFile(content: Buffer): Promise<string> {
@@ -206,10 +287,6 @@ async function writeTempFile(content: Buffer): Promise<string> {
 }
 
 async function diffBuffers(relativePath: string, before: Buffer, after: Buffer): Promise<string> {
-  if (isBinary(before) || isBinary(after)) {
-    return `diff --git a/${relativePath} b/${relativePath}\nBinary files differ`;
-  }
-
   const beforePath = await writeTempFile(before);
   const afterPath = await writeTempFile(after);
   try {
@@ -252,6 +329,7 @@ function getPublicReview(review: StoredChangeReview): PublicChangeReview {
       additions: file.additions,
       deletions: file.deletions,
       diff: file.diff,
+      diffType: file.diffType || inferDiffTypeFromDiff(file.diff),
     })),
     error: review.error,
   };
@@ -356,7 +434,12 @@ export async function collectChangeReview(
 
     const beforeForDiff = beforeBuffer || Buffer.alloc(0);
     const afterForDiff = afterBuffer || Buffer.alloc(0);
-    const diff = await diffBuffers(filePath, beforeForDiff, afterForDiff);
+    let diffType = detectDiffType(filePath, beforeForDiff, afterForDiff);
+    let diff = diffType === "text" ? await diffBuffers(filePath, beforeForDiff, afterForDiff) : "";
+    if (diffType === "text" && inferDiffTypeFromDiff(diff) === "binary") {
+      diffType = "binary";
+      diff = "";
+    }
     const counts = countDiffLines(diff);
 
     files.push({
@@ -365,6 +448,7 @@ export async function collectChangeReview(
       additions: counts.additions,
       deletions: counts.deletions,
       diff,
+      diffType,
       beforeContentBase64: beforeSnapshot.exists ? beforeSnapshot.contentBase64 : null,
       afterContentBase64: afterSnapshot.exists ? afterSnapshot.contentBase64 : null,
     });

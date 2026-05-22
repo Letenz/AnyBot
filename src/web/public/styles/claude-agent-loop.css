@@ -403,6 +403,13 @@
     color: var(--text-muted);
 }
 
+.claude-inline-diff-note {
+    margin-top: 8px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 .claude-inline-diff span {
     display: block;
 }

@@ -745,11 +745,23 @@
             diffs.forEach(function (entry) {
                 var diff = document.createElement('details');
                 diff.className = 'claude-inline-diff';
-                diff.innerHTML =
-                    '<summary>Diff ' + escapeHtml(entry.path) + '</summary>' +
-                    '<pre>' + renderDiff(entry.diff) + '</pre>';
+                if (isBinaryDiffEntry(entry)) {
+                    diff.innerHTML =
+                        '<summary>资源 ' + escapeHtml(entry.path) + '</summary>' +
+                        '<div class="claude-inline-diff-note">媒体或二进制资源已变更，不展示代码 diff。</div>';
+                } else {
+                    diff.innerHTML =
+                        '<summary>Diff ' + escapeHtml(entry.path) + '</summary>' +
+                        '<pre>' + renderDiff(entry.diff) + '</pre>';
+                }
                 toolState.el.appendChild(diff);
             });
+        }
+
+        function isBinaryDiffEntry(entry) {
+            if (!entry) return false;
+            if (entry.diffType) return entry.diffType === 'binary';
+            return /(?:^|\n)(?:Binary files .* differ|GIT binary patch)(?:\n|$)/.test(String(entry.diff || ''));
         }
 
         function renderDiff(diff) {

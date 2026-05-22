@@ -103,6 +103,12 @@
     color: var(--change-review-del-text);
 }
 
+.change-review-count-label {
+    color: var(--text-muted);
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+}
+
 .change-review-files {
     padding: 5px 0;
 }
@@ -170,6 +176,14 @@
 
 .change-review-file[open] .change-review-chevron {
     transform: rotate(90deg);
+}
+
+.change-review-file-note {
+    border-top: 1px solid var(--change-review-divider);
+    padding: 10px 14px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
 }
 
 .message-row.ai .message-content .change-review-card pre.change-review-diff,

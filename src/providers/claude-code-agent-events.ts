@@ -19,6 +19,7 @@ export type ClaudeAgentToolStatus = "running" | "success" | "failed";
 export type ClaudeAgentDiff = {
   path: string;
   diff: string;
+  diffType: "text" | "binary";
 };
 
 export type ClaudeAgentStreamEvent =
@@ -216,7 +217,7 @@ export async function createFileChangeEvent(
     type: "file_change",
     path: normalizeDisplayPath(input.file_path, workdir),
     event: input.event,
-    diff,
+    diff: diff?.diff,
   };
 }
 
@@ -375,13 +376,16 @@ async function collectDiffs(workdir: string, files: string[]): Promise<ClaudeAge
   for (const file of files) {
     const diff = await collectDiff(workdir, file);
     if (diff) {
-      diffs.push({ path: normalizeDisplayPath(file, workdir), diff });
+      diffs.push({ path: normalizeDisplayPath(file, workdir), ...diff });
     }
   }
   return diffs;
 }
 
-async function collectDiff(workdir: string, file: string): Promise<string | undefined> {
+async function collectDiff(
+  workdir: string,
+  file: string,
+): Promise<{ diff: string; diffType: "text" | "binary" } | undefined> {
   try {
     const { stdout } = await execFileAsync(
       "git",
@@ -389,7 +393,14 @@ async function collectDiff(workdir: string, file: string): Promise<string | unde
       { cwd: workdir, maxBuffer: 1024 * 1024 },
     );
     const diff = sanitizeAgentText(stdout).trimEnd();
-    return diff || undefined;
+    if (!diff) return undefined;
+    const diffType = /(?:^|\n)(?:Binary files .* differ|GIT binary patch)(?:\n|$)/.test(diff)
+      ? "binary"
+      : "text";
+    return {
+      diff: diffType === "binary" ? "" : diff,
+      diffType,
+    };
   } catch {
     return undefined;
   }
