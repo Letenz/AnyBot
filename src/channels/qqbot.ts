@@ -2,12 +2,92 @@ import type { QQBotChannelConfig, IChannel, ChannelCallbacks } from "./types.js"
 import { readChannelConfig, updateChannelConfig } from "./config.js";
 import { logger } from "../logger.js";
 import { sanitizeUserText } from "../message.js";
+import type { AgentStreamEvent } from "../web/agent-stream.js";
 import { handleCommand } from "./commands.js";
 import WebSocket from "ws";
 
 const QQ_OAUTH_URL = "https://bots.qq.com/app/getAppAccessToken";
 const QQ_GATEWAY_URL = "https://api.sgroup.qq.com/gateway";
 const QQ_BASE_API = "https://api.sgroup.qq.com";
+const QQ_C2C_STREAM_INTERVAL_MS = 500;
+const QQ_C2C_STREAM_INPUT_STATE_GENERATING = 1;
+const QQ_C2C_STREAM_INPUT_STATE_DONE = 10;
+const QQ_STREAM_MIN_CHARS = 120;
+const QQ_STREAM_MAX_CHARS = 1200;
+const QQ_STREAM_MIN_INTERVAL_MS = 1500;
+
+type QQStreamResponse = {
+  id?: string;
+  [key: string]: unknown;
+};
+
+function markdownToPlainText(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/```[\w-]*\n([\s\S]*?)```/g, (_match, code: string) => code.trim())
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/!\[([^\]]*)]\(([^)\n]+)\)/g, (_match, alt: string, url: string) => alt || url)
+    .replace(/\[([^\]]+)]\(([^)\n]+)\)/g, (_match, label: string, url: string) => {
+      const trimmedLabel = label.trim();
+      const trimmedUrl = url.trim();
+      return trimmedLabel && trimmedLabel !== trimmedUrl ? `${trimmedLabel} (${trimmedUrl})` : trimmedUrl;
+    })
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/~~(.*?)~~/g, "$1")
+    .replace(/^\s*[-*+]\s+/gm, "- ")
+    .replace(/^\s*\d+\.\s+/gm, (match) => match.trimStart())
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function mergeStreamedAndFinalText(streamed: string, finalText: string): string {
+  const streamedTrimmed = streamed.trim();
+  const finalTrimmed = finalText.trim();
+
+  if (!streamedTrimmed) return finalText;
+  if (!finalTrimmed) return streamed;
+  if (streamedTrimmed === finalTrimmed) return finalText;
+  if (finalText.startsWith(streamed) || finalText.includes(streamed)) return finalText;
+  if (streamed.endsWith(finalText) || streamed.includes(finalText)) return streamed;
+
+  return `${streamed.replace(/\s+$/, "")}\n\n${finalText.trimStart()}`;
+}
+
+function takeStreamChunk(buffer: string, force = false): { chunk: string; rest: string } | null {
+  if (!buffer.trim()) return null;
+  if (!force && buffer.length < QQ_STREAM_MIN_CHARS) return null;
+
+  const maxCut = Math.min(buffer.length, QQ_STREAM_MAX_CHARS);
+  let cut = force ? buffer.length : -1;
+  if (!force) {
+    const search = buffer.slice(0, maxCut);
+    const boundaryCandidates = [
+      search.lastIndexOf("\n\n") + 2,
+      search.lastIndexOf("\n") + 1,
+      Math.max(
+        search.lastIndexOf("。") + 1,
+        search.lastIndexOf("！") + 1,
+        search.lastIndexOf("？") + 1,
+        search.lastIndexOf(". ") + 2,
+        search.lastIndexOf("! ") + 2,
+        search.lastIndexOf("? ") + 2,
+      ),
+    ];
+    cut = boundaryCandidates.find((candidate) => candidate >= QQ_STREAM_MIN_CHARS) || -1;
+    if (cut < QQ_STREAM_MIN_CHARS) {
+      if (buffer.length < QQ_STREAM_MAX_CHARS) return null;
+      cut = maxCut;
+    }
+  }
+
+  const chunk = buffer.slice(0, cut).trim();
+  const rest = buffer.slice(cut).trimStart();
+  return chunk ? { chunk, rest } : null;
+}
 
 export class QQBotChannel implements IChannel {
   readonly type = "qqbot";
@@ -16,6 +96,9 @@ export class QQBotChannel implements IChannel {
   private callbacks: ChannelCallbacks | null = null;
   private ws: WebSocket | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectAttempts = 0;
+  private stopping = false;
   private lastSeq: number | null = null;
   private accessToken: string | null = null;
   private tokenExpiresAt: number = 0;
@@ -34,6 +117,8 @@ export class QQBotChannel implements IChannel {
 
     this.config = config;
     this.callbacks = callbacks;
+    this.stopping = false;
+    this.reconnectAttempts = 0;
     
     try {
       await this.connect();
@@ -45,9 +130,14 @@ export class QQBotChannel implements IChannel {
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
     if (this.ws) {
       try {
@@ -60,6 +150,32 @@ export class QQBotChannel implements IChannel {
     this.callbacks = null;
     this.config = null;
     logger.info("qqbot.stopped");
+  }
+
+  private clearHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.stopping || !this.config || !this.callbacks || this.reconnectTimer) return;
+
+    const attempt = this.reconnectAttempts + 1;
+    const delayMs = Math.min(30_000, 1_000 * 2 ** Math.min(this.reconnectAttempts, 5));
+    this.reconnectAttempts = attempt;
+    logger.warn("qqbot.reconnect_scheduled", { attempt, delayMs });
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.stopping || !this.config || !this.callbacks) return;
+
+      this.connect().catch((error) => {
+        logger.error("qqbot.reconnect_failed", { attempt, error });
+        this.scheduleReconnect();
+      });
+    }, delayMs);
   }
 
   private async getValidToken(): Promise<string> {
@@ -108,13 +224,15 @@ export class QQBotChannel implements IChannel {
 
     logger.info("qqbot.ws_connecting", { url: wsUrl });
 
-    this.ws = new WebSocket(wsUrl);
+    this.clearHeartbeat();
+    const socket = new WebSocket(wsUrl);
+    this.ws = socket;
 
-    this.ws.on("open", () => {
+    socket.on("open", () => {
       logger.info("qqbot.ws_opened");
     });
 
-    this.ws.on("message", (data: any) => {
+    socket.on("message", (data: any) => {
       const payloadString = data.toString();
       let payload: any;
       try {
@@ -136,7 +254,7 @@ export class QQBotChannel implements IChannel {
         logger.info("qqbot.ws_hello", { heartbeatInterval: interval });
         
         // 发送 Identify, 请求公域与频道的普通消息以及私信
-        this.ws!.send(JSON.stringify({
+        socket.send(JSON.stringify({
           op: 2,
           d: {
             token: `QQBot ${this.accessToken}`,
@@ -146,30 +264,32 @@ export class QQBotChannel implements IChannel {
         }));
 
         this.heartbeatInterval = setInterval(() => {
-          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-              this.ws.send(JSON.stringify({ op: 1, d: this.lastSeq }));
+          if (socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({ op: 1, d: this.lastSeq }));
           }
         }, interval);
       } else if (op === 0 && t === "READY") {
+        this.reconnectAttempts = 0;
         logger.info("qqbot.started", { user: payload.d.user });
       } else if (op === 0 && (t === "DIRECT_MESSAGE_CREATE" || t === "AT_MESSAGE_CREATE" || t === "GROUP_AT_MESSAGE_CREATE" || t === "C2C_MESSAGE_CREATE")) {
         // 处理消息事件
         this.handleMessage(payload.d, t);
       } else if (op === 9) {
         logger.error("qqbot.ws_invalid_session");
+        socket.close();
       }
     });
 
-    this.ws.on("close", (code: number, reason: Buffer) => {
+    socket.on("close", (code: number, reason: Buffer) => {
       logger.warn("qqbot.ws_closed", { code, reason: reason.toString() });
-      if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = null;
+      if (this.ws === socket) {
+        this.ws = null;
       }
-      // TODO: 添加断线重连逻辑
+      this.clearHeartbeat();
+      this.scheduleReconnect();
     });
     
-    this.ws.on("error", (error: Error) => {
+    socket.on("error", (error: Error) => {
       logger.error("qqbot.ws_error", { error });
     });
   }
@@ -211,6 +331,10 @@ export class QQBotChannel implements IChannel {
   private async handleMessage(message: any, eventType: string): Promise<void> {
     // 频道和单聊里的作者ID是不一样的字段结构
     let chatId = message.guild_id || message.channel_id || message.author?.id;
+
+    if (eventType === "C2C_MESSAGE_CREATE" && message.author?.user_openid) {
+      chatId = message.author.user_openid;
+    }
     
     // 群聊（新版群助手）
     if (message.group_openid) {
@@ -251,13 +375,7 @@ export class QQBotChannel implements IChannel {
       }
 
       try {
-        const reply = await this.callbacks!.generateReply(
-          chatId,
-          userText,
-          undefined,
-          "qqbot"
-        );
-        await this.sendText(chatId, message.id, reply, eventType);
+        await this.generateAndSendReply(chatId, message.id, userText, eventType);
       } catch (error) {
         logger.error("qqbot.text.failed", {
           messageId: message.id,
@@ -282,7 +400,293 @@ export class QQBotChannel implements IChannel {
     this.queueByChat.set(chatId, next);
   }
 
-  private async sendText(chatId: string, msgId: string, text: string, eventType: string): Promise<void> {
+  private async generateAndSendReply(
+    chatId: string,
+    msgId: string,
+    userText: string,
+    eventType: string,
+  ): Promise<void> {
+    const generateReplyStream = this.callbacks?.generateReplyStream;
+    if (!generateReplyStream) {
+      const reply = await this.callbacks!.generateReply(chatId, userText, undefined, "qqbot");
+      await this.sendText(chatId, msgId, reply, eventType);
+      return;
+    }
+
+    if (eventType === "C2C_MESSAGE_CREATE") {
+      const result = await this.generateAndSendC2cStreamReply(
+        chatId,
+        msgId,
+        userText,
+        generateReplyStream,
+      );
+      if (result.handled) return;
+      if (result.reply) {
+        await this.sendText(chatId, msgId, result.reply, eventType);
+        return;
+      }
+    }
+
+    await this.generateAndSendChunkedReply(chatId, msgId, userText, eventType, generateReplyStream);
+  }
+
+  private async generateAndSendC2cStreamReply(
+    chatId: string,
+    msgId: string,
+    userText: string,
+    generateReplyStream: NonNullable<ChannelCallbacks["generateReplyStream"]>,
+  ): Promise<{ handled: boolean; reply?: string }> {
+    let fullText = "";
+    let streamMsgId: string | undefined;
+    let sentAnyStream = false;
+    let streamFailed = false;
+    let lastSentText = "";
+    let lastFlushAt = 0;
+    let streamIndex = 0;
+    const msgSeq = 1;
+    let flushTimer: NodeJS.Timeout | null = null;
+    let sendQueue = Promise.resolve();
+
+    const clearFlushTimer = () => {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+    };
+
+    const sendStreamUpdate = async (inputState: number): Promise<void> => {
+      if (streamFailed) return;
+      const content = fullText;
+      if (!content.trim()) return;
+      if (
+        inputState === QQ_C2C_STREAM_INPUT_STATE_GENERATING &&
+        sentAnyStream &&
+        content === lastSentText
+      ) {
+        return;
+      }
+
+      const response = await this.sendC2cStreamMessage({
+        chatId,
+        msgId,
+        msgSeq,
+        index: streamIndex++,
+        streamMsgId,
+        inputState,
+        content,
+      });
+      if (!streamMsgId && typeof response.id === "string") {
+        streamMsgId = response.id;
+      }
+      sentAnyStream = true;
+      lastSentText = content;
+      lastFlushAt = Date.now();
+    };
+
+    const queueStreamUpdate = (inputState: number): Promise<void> => {
+      sendQueue = sendQueue
+        .then(() => sendStreamUpdate(inputState))
+        .catch((error) => {
+          streamFailed = true;
+          logger.warn("qqbot.stream.c2c_update_failed", {
+            messageId: msgId,
+            chatId,
+            sentAnyStream,
+            error,
+          });
+        });
+      return sendQueue;
+    };
+
+    const requestGeneratingUpdate = (): Promise<void> | void => {
+      if (!fullText.trim() || streamFailed) return;
+      const now = Date.now();
+      if (!sentAnyStream || now - lastFlushAt >= QQ_C2C_STREAM_INTERVAL_MS) {
+        clearFlushTimer();
+        return queueStreamUpdate(QQ_C2C_STREAM_INPUT_STATE_GENERATING);
+      }
+      if (!flushTimer) {
+        const delayMs = Math.max(0, QQ_C2C_STREAM_INTERVAL_MS - (now - lastFlushAt));
+        flushTimer = setTimeout(() => {
+          flushTimer = null;
+          void queueStreamUpdate(QQ_C2C_STREAM_INPUT_STATE_GENERATING);
+        }, delayMs);
+      }
+    };
+
+    const onEvent = (event: AgentStreamEvent): Promise<void> | void => {
+      if (event.type !== "answer_delta" || !event.text) return;
+      fullText += event.text;
+      return requestGeneratingUpdate();
+    };
+
+    let reply: string;
+    try {
+      reply = await generateReplyStream(
+        chatId,
+        userText,
+        undefined,
+        "qqbot",
+        onEvent,
+      );
+    } catch (error) {
+      clearFlushTimer();
+      await sendQueue;
+      if (sentAnyStream && !streamFailed) {
+        fullText = `${fullText.replace(/\s+$/, "")}\n\n处理消息时出错了，请稍后再试。`;
+        await queueStreamUpdate(QQ_C2C_STREAM_INPUT_STATE_DONE);
+        await sendQueue;
+        return { handled: true, reply: fullText };
+      }
+      throw error;
+    }
+    clearFlushTimer();
+    await sendQueue;
+
+    fullText = mergeStreamedAndFinalText(fullText, reply);
+    if (!fullText.trim()) return { handled: false, reply };
+    if (streamFailed && !sentAnyStream) return { handled: false, reply: fullText };
+
+    if (!sentAnyStream) {
+      await queueStreamUpdate(QQ_C2C_STREAM_INPUT_STATE_GENERATING);
+      await sendQueue;
+    }
+    if (streamFailed && !sentAnyStream) return { handled: false, reply: fullText };
+    if (!streamFailed) {
+      await queueStreamUpdate(QQ_C2C_STREAM_INPUT_STATE_DONE);
+      await sendQueue;
+    }
+
+    return { handled: sentAnyStream, reply: fullText };
+  }
+
+  private async generateAndSendChunkedReply(
+    chatId: string,
+    msgId: string,
+    userText: string,
+    eventType: string,
+    generateReplyStream: NonNullable<ChannelCallbacks["generateReplyStream"]>,
+  ): Promise<void> {
+    let buffer = "";
+    let streamedText = "";
+    let sentAnyChunk = false;
+    let msgSeq = 1;
+    let lastFlushAt = Date.now();
+    let sendQueue = Promise.resolve();
+
+    const queueChunk = (chunk: string) => {
+      const seq = msgSeq++;
+      sentAnyChunk = true;
+      lastFlushAt = Date.now();
+      sendQueue = sendQueue.then(() => this.sendText(chatId, msgId, chunk, eventType, seq));
+    };
+
+    const flush = (force = false) => {
+      const picked = takeStreamChunk(buffer, force);
+      if (!picked) return;
+      buffer = picked.rest;
+      queueChunk(picked.chunk);
+    };
+
+    const onEvent = (event: AgentStreamEvent) => {
+      if (event.type !== "answer_delta" || !event.text) return;
+      streamedText += event.text;
+      buffer += event.text;
+
+      const shouldFlush =
+        buffer.length >= QQ_STREAM_MAX_CHARS ||
+        (buffer.length >= QQ_STREAM_MIN_CHARS && Date.now() - lastFlushAt >= QQ_STREAM_MIN_INTERVAL_MS);
+      if (shouldFlush) flush(false);
+    };
+
+    const reply = await generateReplyStream(chatId, userText, undefined, "qqbot", onEvent);
+    const finalText = mergeStreamedAndFinalText(streamedText, reply);
+    if (finalText && finalText.startsWith(streamedText)) {
+      buffer += finalText.slice(streamedText.length);
+    } else if (!sentAnyChunk && reply) {
+      buffer += finalText;
+    } else if (finalText && finalText !== streamedText) {
+      buffer += `\n\n${finalText}`;
+    }
+    flush(true);
+    await sendQueue;
+  }
+
+  private async sendC2cStreamMessage(opts: {
+    chatId: string;
+    msgId: string;
+    msgSeq: number;
+    index: number;
+    streamMsgId?: string;
+    inputState: number;
+    content: string;
+  }): Promise<QQStreamResponse> {
+    const url = `${QQ_BASE_API}/v2/users/${opts.chatId}/stream_messages`;
+    const body = {
+      input_mode: "replace",
+      input_state: opts.inputState,
+      content_type: "markdown",
+      content_raw: opts.content,
+      event_id: opts.msgId,
+      msg_id: opts.msgId,
+      msg_seq: opts.msgSeq,
+      index: opts.index,
+      ...(opts.streamMsgId ? { stream_msg_id: opts.streamMsgId } : {}),
+    };
+
+    const post = async (token: string) => {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": `QQBot ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      const responseText = await res.text();
+      let responseData: unknown = responseText;
+      try {
+        responseData = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        // Keep raw response text for diagnostics.
+      }
+      return { res, responseData };
+    };
+
+    let { res, responseData } = await post(await this.getValidToken());
+    if (res.status === 401) {
+      this.accessToken = null;
+      this.tokenExpiresAt = 0;
+      ({ res, responseData } = await post(await this.getValidToken()));
+    }
+
+    if (!res.ok) {
+      logger.warn("qqbot.stream.c2c_failed_http", {
+        status: res.status,
+        response: responseData,
+        messageId: opts.msgId,
+        index: opts.index,
+        inputState: opts.inputState,
+      });
+      throw new Error(`QQ C2C stream failed: HTTP ${res.status}`);
+    }
+
+    logger.info("qqbot.stream.c2c_success", {
+      chatId: opts.chatId,
+      messageId: opts.msgId,
+      index: opts.index,
+      inputState: opts.inputState,
+    });
+    return (responseData && typeof responseData === "object" ? responseData : {}) as QQStreamResponse;
+  }
+
+  private async sendText(
+    chatId: string,
+    msgId: string,
+    text: string,
+    eventType: string,
+    msgSeq = 1,
+  ): Promise<void> {
     try {
       const token = await this.getValidToken();
       let url = "";
@@ -309,25 +713,56 @@ export class QQBotChannel implements IChannel {
 
       logger.info("qqbot.send_text.start", { chatId, url });
 
-      // QQ的要求：回复消息需要带上 msg_id
-      const body = {
-          content: text,
-          msg_id: msgId,
-          // 如果是C2C或者GROUP，新版要求有 msg_type: 0 代表文本，同时不需要 msg_id 也能回复
-          // 但是有些文档显示带上 msg_type 更好：
-          msg_type: 0 
-      };
+      const usesV2MessageApi =
+        eventType === "GROUP_AT_MESSAGE_CREATE" || eventType === "C2C_MESSAGE_CREATE";
+      const markdownBody = usesV2MessageApi
+        ? {
+            msg_type: 2,
+            markdown: { content: text },
+            msg_id: msgId,
+            msg_seq: msgSeq,
+          }
+        : {
+            markdown: { content: text },
+            msg_id: msgId,
+          };
+      const textBody = usesV2MessageApi
+        ? {
+            msg_type: 0,
+            content: markdownToPlainText(text),
+            msg_id: msgId,
+            msg_seq: msgSeq,
+          }
+        : {
+            content: markdownToPlainText(text),
+            msg_id: msgId,
+          };
 
-      const res = await fetch(url, {
+      const postBody = async (body: object) => {
+        const res = await fetch(url, {
           method: "POST",
           headers: {
               "Authorization": `QQBot ${token}`,
               "Content-Type": "application/json"
           },
           body: JSON.stringify(body)
-      });
+        });
+        const responseText = await res.text();
+        let responseData: unknown = responseText;
+        try {
+          responseData = responseText ? JSON.parse(responseText) : null;
+        } catch {
+          // Keep the raw text response for logging.
+        }
+        return { res, responseData };
+      };
       
-      const responseData = await res.json();
+      let { res, responseData } = await postBody(markdownBody);
+      if (!res.ok) {
+          logger.warn("qqbot.send_text.markdown_failed_http", { status: res.status, response: responseData });
+          ({ res, responseData } = await postBody(textBody));
+      }
+
       if (!res.ok) {
           logger.error("qqbot.send_text.failed_http", { status: res.status, response: responseData });
           

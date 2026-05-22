@@ -193,12 +193,15 @@ export function getDataDir(): string {
 export function readAppSettings(): AppSettings {
   ensureConfig();
   try {
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8"));
+    const rawText = readFileSync(CONFIG_PATH, "utf-8");
+    const raw = JSON.parse(rawText);
     const settings = mergeSettings(raw);
-    writeFileSync(CONFIG_PATH, JSON.stringify(settings, null, 2), "utf-8");
+    const normalizedText = JSON.stringify(settings, null, 2);
+    if (rawText.trim() !== normalizedText.trim()) {
+      writeFileSync(CONFIG_PATH, normalizedText, "utf-8");
+    }
     return settings;
   } catch {
-    writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_SETTINGS, null, 2), "utf-8");
     return DEFAULT_SETTINGS;
   }
 }

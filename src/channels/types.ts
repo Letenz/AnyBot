@@ -1,3 +1,5 @@
+import type { AgentStreamEvent } from "../web/agent-stream.js";
+
 export interface ChannelConfig {
   enabled: boolean;
   appId: string;
@@ -68,6 +70,13 @@ export interface ChannelCallbacks {
     userText: string,
     imagePaths?: string[],
     source?: string,
+  ) => Promise<string>;
+  generateReplyStream?: (
+    chatId: string,
+    userText: string,
+    imagePaths: string[] | undefined,
+    source: string | undefined,
+    onEvent: (event: AgentStreamEvent) => void | Promise<void>,
   ) => Promise<string>;
   resetSession: (chatId: string, source?: string) => void;
   listProviders: () => ProviderInfo[];

@@ -287,7 +287,15 @@ export async function runPreparedChatTurn(
     if (shouldPersistAgentEvent(event)) {
       agentEvents.push(event);
     }
-    await opts.stream?.emit(event);
+    try {
+      await opts.stream?.emit(event);
+    } catch (error) {
+      logger.warn(`${opts.logPrefix}.stream_emit_failed`, {
+        sessionId: prepared.session.id,
+        eventType: event.type,
+        error,
+      });
+    }
   };
 
   db.addMessage(
@@ -310,7 +318,10 @@ export async function runPreparedChatTurn(
 
   logger.info(`${opts.logPrefix}.start`, buildLogFields(prepared, opts));
 
-  const changeSnapshot = await safeCreateChangeSnapshotForWorkdir(prepared.workdir);
+  const shouldReviewChanges = prepared.source === "web";
+  const changeSnapshot = shouldReviewChanges
+    ? await safeCreateChangeSnapshotForWorkdir(prepared.workdir)
+    : null;
   try {
     const runOptions = {
       workdir: prepared.workdir,
@@ -330,7 +341,9 @@ export async function runPreparedChatTurn(
       : await prepared.provider.run(runOptions);
 
     const providerSessionId = result.sessionId || prepared.providerSessionId;
-    const changeReview = await safeCollectChangeReview(changeSnapshot);
+    const changeReview = shouldReviewChanges
+      ? await safeCollectChangeReview(changeSnapshot)
+      : null;
     if (result.contextUsage) {
       await emitStream({
         type: "context_usage",
@@ -389,7 +402,9 @@ export async function runPreparedChatTurn(
     };
   } catch (error) {
     if (error instanceof ProviderCancelledError) {
-      const changeReview = await safeCollectChangeReview(changeSnapshot);
+      const changeReview = shouldReviewChanges
+        ? await safeCollectChangeReview(changeSnapshot)
+        : null;
       db.addMessage(
         prepared.session.id,
         "assistant",

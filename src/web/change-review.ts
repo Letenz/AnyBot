@@ -242,6 +242,17 @@ async function createFilesystemSnapshot(workdir: string): Promise<ChangeSnapshot
   };
 }
 
+async function readFileSnapshots(
+  workdir: string,
+  filePaths: string[],
+): Promise<Map<string, SnapshotFile>> {
+  const snapshots = new Map<string, SnapshotFile>();
+  for (const filePath of filePaths) {
+    snapshots.set(filePath, await readFileSnapshot(workdir, filePath));
+  }
+  return snapshots;
+}
+
 function decodeBase64(value: string | null): Buffer {
   return value ? Buffer.from(value, "base64") : Buffer.alloc(0);
 }
@@ -390,14 +401,7 @@ export async function collectChangeReview(
 
   const afterFiles =
     snapshot.mode === "filesystem"
-      ? new Map(
-          await Promise.all(
-            (await walkWorkspaceFiles(snapshot.workdir)).map(async (filePath) => [
-              filePath,
-              await readFileSnapshot(snapshot.workdir, filePath),
-            ] as const),
-          ),
-        )
+      ? await readFileSnapshots(snapshot.workdir, await walkWorkspaceFiles(snapshot.workdir))
       : null;
   const afterPaths =
     snapshot.mode === "git"

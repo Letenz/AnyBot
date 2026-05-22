@@ -515,12 +515,18 @@ export class CodexProvider implements IProvider {
         tokenCountInfo,
       });
 
-      await onEvent?.({
+      void Promise.resolve(onEvent?.({
         type: "agent_status",
         status: "completed",
         message: "Codex Agent 已完成",
         sessionId: providerSessionId || undefined,
         durationMs: Date.now() - startedAt,
+      })).catch((error: unknown) => {
+        logger.warn("provider.exec.completed_event_failed", {
+          provider: this.type,
+          sessionId: providerSessionId,
+          error,
+        });
       });
 
       return {

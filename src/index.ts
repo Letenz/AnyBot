@@ -72,6 +72,7 @@ async function generateReply(
   userText: string,
   imagePaths: string[] = [],
   source: string = "unknown",
+  onEvent?: (event: AgentStreamEvent) => void | Promise<void>,
 ): Promise<string> {
   const dbSession = getOrCreateChannelSession(source, chatId);
   const workdir = getSessionWorkdir(dbSession);
@@ -86,8 +87,11 @@ async function generateReply(
   const active = canStreamPreparedChatTurn(prepared) && !hasActiveAgentStream(dbSession.id)
     ? createActiveAgentStream(dbSession.id)
     : null;
-  const emit = active
-    ? (event: AgentStreamEvent) => emitAgentStream(active, event)
+  const emit = active || onEvent
+    ? async (event: AgentStreamEvent) => {
+        if (active) emitAgentStream(active, event);
+        await onEvent?.(event);
+      }
     : undefined;
 
   try {
@@ -184,6 +188,8 @@ function handleSwitchWorkspace(
 const channelCallbacks: ChannelCallbacks = {
   generateReply: (chatId, userText, imagePaths, source) =>
     generateReply(chatId, userText, imagePaths, source),
+  generateReplyStream: (chatId, userText, imagePaths, source, onEvent) =>
+    generateReply(chatId, userText, imagePaths, source, onEvent),
   resetSession: resetChannelSession,
   listProviders,
   switchProvider: handleSwitchProvider,
